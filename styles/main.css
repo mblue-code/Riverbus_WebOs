@@ -1,0 +1,136 @@
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: #000;
+    color: #fff;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+}
+
+/* App container */
+#app {
+    width: 100%;
+    height: 100%;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+}
+
+.container {
+    width: 90%;
+    max-width: 1600px;
+    padding: 40px;
+}
+
+/* Title */
+.title {
+    font-size: 64px;
+    margin-bottom: 60px;
+    text-align: center;
+    -webkit-animation-duration: 1s;
+    animation-duration: 1s;
+    -webkit-animation-name: fadeIn;
+    animation-name: fadeIn;
+}
+
+/* Menu styles */
+.menu {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    gap: 20px;
+    margin-bottom: 60px;
+}
+
+.menu-item {
+    padding: 30px 40px;
+    font-size: 36px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 3px solid transparent;
+    border-radius: 8px;
+    -webkit-transition: all 0.3s ease;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+/* Selection effect - REQUIRED for LG certification */
+.menu-item.selected {
+    background-color: rgba(255, 255, 255, 0.3);
+    border-color: #fff;
+    -webkit-transform: scale(1.05);
+    transform: scale(1.05);
+}
+
+.menu-item:focus {
+    outline: none;
+    border-color: #fff;
+}
+
+/* Content area */
+.content {
+    padding: 30px;
+    font-size: 28px;
+    line-height: 1.6;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+}
+
+/* Animations */
+@-webkit-keyframes fadeIn {
+    from {
+        opacity: 0;
+        -webkit-transform: translateY(-20px);
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        -webkit-transform: translateY(0);
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        -webkit-transform: translateY(-20px);
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        -webkit-transform: translateY(0);
+        transform: translateY(0);
+    }
+}
+
+/* Responsive for 720p TVs */
+@media screen and (max-width: 1280px) {
+    body {
+        width: 1280px;
+        height: 720px;
+    }
+
+    .title {
+        font-size: 48px;
+        margin-bottom: 40px;
+    }
+
+    .menu-item {
+        padding: 20px 30px;
+        font-size: 28px;
+    }
+
+    .content {
+        font-size: 22px;
+    }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "com.yourdomain.yourapp",
+  "version": "1.0.0",
+  "vendor": "Your Company Name",
+  "type": "web",
+  "main": "index.html",
+  "title": "Your webOS TV App",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "bgImage": "bg.png",
+  "resolution": "1920x1080",
+  "requiredMemory": 20,
+  "disableBackHistoryAPI": false,
+  "bgColor": "#000000",
+  "iconColor": "#FFFFFF",
+  "splashBackground": "splash.png",
+  "enableKeyboard": false,
+  "supportedMediaUrls": [],
+  "mediaRestrictions": {
+    "network": "all"
+  }
+}
