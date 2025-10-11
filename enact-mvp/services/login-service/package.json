@@ -1,0 +1,9 @@
+{
+  "name": "com.community.floatplane.enactmvp.login",
+  "version": "0.1.0",
+  "description": "Floatplane login Luna service",
+  "main": "login-service.js",
+  "dependencies": {
+    "webos-service": "git+https://github.com/webosose/nodejs-module-webos-service.git"
+  }
+}

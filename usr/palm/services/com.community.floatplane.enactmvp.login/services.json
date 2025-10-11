@@ -1,0 +1,17 @@
+{
+  "id": "com.community.floatplane.enactmvp.login",
+  "version": "0.1.0",
+  "vendor": "Community Floatplane",
+  "type": "webos-service",
+  "main": "login-service.js",
+  "services": [
+    {
+      "name": "login",
+      "description": "Authenticate with Floatplane"
+    },
+    {
+      "name": "factor",
+      "description": "Verify Floatplane two-factor token"
+    }
+  ]
+}

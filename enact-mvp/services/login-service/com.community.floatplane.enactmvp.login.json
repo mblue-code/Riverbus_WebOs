@@ -1,0 +1,14 @@
+{
+  "role": {
+    "allowedNames": ["com.community.floatplane.enactmvp.login"],
+    "type": "regular",
+    "exeName": "js"
+  },
+  "permissions": [
+    {
+      "service": "com.community.floatplane.enactmvp.login",
+      "inbound": ["*"],
+      "outbound": ["*"]
+    }
+  ]
+}

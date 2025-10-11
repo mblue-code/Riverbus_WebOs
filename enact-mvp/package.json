@@ -1,0 +1,30 @@
+{
+  "name": "floatplane-enact-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enact-based MVP for Floatplane webOS app with LS2 login service",
+  "main": "src/index.js",
+  "scripts": {
+    "serve": "enact serve",
+    "pack": "enact pack",
+    "lint": "enact lint",
+    "install-service": "ares-novacom -- install service ./services/login-service"
+  },
+  "dependencies": {
+    "@enact/core": "^4.5.6",
+    "@enact/moonstone": "^4.5.6",
+    "@enact/webos": "^4.5.6",
+    "prop-types": "^15.8.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@enact/cli": "^5.0.0"
+  },
+  "engines": {
+    "node": "^20.10.0 || >=22.0.0"
+  },
+  "enact": {
+    "theme": "moonstone"
+  }
+}

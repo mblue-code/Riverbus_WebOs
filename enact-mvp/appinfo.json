@@ -1,0 +1,19 @@
+{
+	"id": "com.community.floatplane.enactmvp",
+	"version": "0.1.0",
+	"vendor": "Community Floatplane",
+	"type": "web",
+	"main": "index.html",
+	"title": "Floatplane Enact MVP",
+	"icon": "resources/icon.png",
+	"largeIcon": "resources/largeIcon.png",
+	"requiredVersion": "1.0.0",
+	"bgColor": "#000000",
+	"transparent": false,
+	"resolution": "1920x1080",
+	"services": [
+		{
+			"name": "com.community.floatplane.enactmvp.login"
+		}
+	]
+}
