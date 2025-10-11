@@ -14,8 +14,74 @@ body {
 }
 
 .homePanelBody {
-	gap: 20px;
-	padding-bottom: 16px;
+	display: flex;
+	flex-direction: row;
+	gap: 24px;
+	padding: 24px;
+	align-items: stretch;
+}
+
+.homeSideNav {
+	width: 320px;
+	background: rgba(255, 255, 255, 0.05);
+	border-radius: 20px;
+	padding: 20px;
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.sideNav__section {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.sideNav__grow {
+	flex: 1;
+}
+
+.sideNav__logout {
+	width: 100%;
+	justify-content: center;
+}
+
+.homeSideNav .searchRow {
+	padding: 0;
+}
+
+.homeSideNav .searchInput {
+	gap: 10px;
+}
+
+.homeSideNav .viewTabs {
+	padding: 0;
+}
+
+.homeSideNav .channelPills {
+	padding: 0;
+}
+
+.homeMain {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.homeMain__content {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.homeMain .statusBar {
+	margin: 0;
 }
 
 .playerPanelBody {
@@ -33,10 +99,14 @@ body {
 
 .creatorHero {
 	position: relative;
-	min-height: 260px;
+	min-height: 210px;
 	border-radius: 24px;
 	overflow: hidden;
 	background-color: #1c1c1e;
+}
+
+.creatorHero--compact {
+	min-height: 210px;
 }
 
 .creatorHero__cover {
@@ -130,12 +200,24 @@ body {
 	box-shadow: 0 8px 18px rgba(46, 110, 252, 0.24);
 }
 
+.viewTabs--vertical {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 10px;
+	padding: 0;
+}
+
+.viewTab--vertical {
+	width: 100%;
+	justify-content: flex-start;
+	text-align: left;
+}
+
 .searchRow {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
 	gap: 16px;
-	padding: 0 8px;
 }
 
 .searchInput {
@@ -169,6 +251,19 @@ body {
 	padding: 0 8px;
 }
 
+.channelPills--vertical {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 8px;
+	padding: 0;
+}
+
+.channelButton--vertical {
+	width: 100%;
+	justify-content: flex-start;
+	text-align: left;
+}
+
 .videoScroller {
 	flex: 1;
 	min-height: 0;
@@ -180,6 +275,17 @@ body {
 	gap: 18px;
 	padding: 4px 8px 24px;
 }
+
+.videoVirtualGrid {
+	flex: 1;
+	min-height: 0;
+	height: 100%;
+}
+
+.videoVirtualGrid .moonstone-virtualgridlist-item {
+	padding: 10px;
+}
+
 
 .videoCard {
 	background: rgba(255, 255, 255, 0.05);
@@ -198,6 +304,12 @@ body {
 	transform: translateY(-4px);
 	background: rgba(255, 255, 255, 0.08);
 	box-shadow: 0 18px 38px rgba(0, 0, 0, 0.32);
+}
+
+.videoCard.spotlight {
+	transform: translateY(-4px);
+	background: rgba(96, 146, 255, 0.26);
+	box-shadow: 0 20px 46px rgba(96, 146, 255, 0.32);
 }
 
 .videoCard--selected {
@@ -318,12 +430,6 @@ body {
 
 .statusBar__error {
 	color: #ff6f6f;
-}
-
-.homeFooter {
-	display: flex;
-	justify-content: flex-end;
-	padding: 0 8px 24px;
 }
 
 .playerContainer {
@@ -551,4 +657,7 @@ body {
 
 .errorText {
 	color: #ff7575;
+}
+.channelButton {
+	border-radius: 12px !important;
 }

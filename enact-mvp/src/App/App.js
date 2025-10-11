@@ -6,17 +6,22 @@ import Header from '@enact/moonstone/Panels/Header';
 import BodyText from '@enact/moonstone/BodyText';
 import Button from '@enact/moonstone/Button';
 import Item from '@enact/moonstone/Item';
-import Scroller from '@enact/moonstone/Scroller';
 import Heading from '@enact/moonstone/Heading';
 import Spinner from '@enact/moonstone/Spinner';
 import Input from '@enact/moonstone/Input';
+import Scroller from '@enact/moonstone/Scroller';
+import Spottable from '@enact/spotlight/Spottable';
+import Spotlight from '@enact/spotlight';
+import {VirtualGridList} from '@enact/moonstone/VirtualList';
 import LS2Request from '@enact/webos/LS2Request';
 import LoginForm from '../components/LoginForm';
 
 const SERVICE_ID = 'luna://com.community.floatplane.enactmvp.login';
-const VIDEO_PAGE_SIZE = 32;
+const VIDEO_PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 500;
 const HERO_FALLBACK_COLOR = '#1c1c1e';
+
+const FocusableCard = Spottable('div');
 
 const createInitialState = () => ({
 	user: null,
@@ -202,6 +207,11 @@ const normalizeVideo = (item = {}, creator = null) => {
 	};
 };
 
+const findFirstPlayableVideo = (videos = []) =>
+	videos.find((video) => video && (video.attachmentId || (video.videoAttachments && video.videoAttachments.length))) ||
+	videos[0] ||
+	null;
+
 const guessMimeType = (url) => {
 	if (!url) {
 		return 'video/mp4';
@@ -318,10 +328,26 @@ class AppBase extends Component {
 
 	videoRef = createRef();
 	videoEventHandlers = [];
+	focusTimeout = null;
+	constructor(props) {
+		super(props);
+		this.renderVideoItem = this.renderVideoItem.bind(this);
+	}
+
+	safeSetContainerDefault = (containerId, elementId) => {
+		try {
+			Spotlight.setContainerDefault(containerId, elementId);
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.warn('[Floatplane] Spotlight.setContainerDefault failed', containerId, elementId, error);
+		}
+	};
 
 	componentDidMount() {
 		this.bootstrapSession();
 		this.attachVideoListeners();
+		this.safeSetContainerDefault('sideNav', 'nav-item-home');
+		this.safeSetContainerDefault('videoGridContainer', 'videoCard-0');
 	}
 
 	componentDidUpdate(prevProps, prevState) {
@@ -333,12 +359,39 @@ class AppBase extends Component {
 			this.attachVideoListeners();
 			this.triggerVideoPlayback();
 		}
+		const channelsChanged = prevState.channels !== this.state.channels || prevState.channels.length !== this.state.channels.length;
+		if (channelsChanged) {
+			this.safeSetContainerDefault('sideNav', 'nav-item-home');
+		}
+		if (prevState.view !== this.state.view && !this.state.showPlayer) {
+			this.safeSetContainerDefault('sideNav', 'nav-item-home');
+			this.queueFocusFirstVideo();
+		}
+		if (prevState.showPlayer && !this.state.showPlayer) {
+			this.queueFocusFirstVideo();
+		}
+		if (prevState.selectedChannelId !== this.state.selectedChannelId && !this.state.showPlayer) {
+			this.queueFocusFirstVideo();
+		}
+		if (prevState.searchAppliedTerm !== this.state.searchAppliedTerm && !this.state.showPlayer) {
+			this.queueFocusFirstVideo();
+		}
+		if (prevState.videos !== this.state.videos) {
+			this.safeSetContainerDefault('videoGridContainer', 'videoCard-0');
+			if (this.state.videos.length && !this.state.showPlayer) {
+				this.queueFocusFirstVideo();
+			}
+		}
 	}
 
 	componentWillUnmount() {
 		this.detachVideoListeners();
 		if (this.state.searchTimer) {
 			clearTimeout(this.state.searchTimer);
+		}
+		if (this.focusTimeout) {
+			clearTimeout(this.focusTimeout);
+			this.focusTimeout = null;
 		}
 	}
 
@@ -577,7 +630,7 @@ class AppBase extends Component {
 			return;
 		}
 
-		const fetchAfter = append ? this.state.videoNextCursor : 0;
+		const fetchAfter = append ? this.state.videoNextCursor : null;
 		const searchTerm =
 			overrideSearch !== undefined ? overrideSearch : this.state.searchAppliedTerm || this.state.searchTerm;
 
@@ -615,7 +668,11 @@ class AppBase extends Component {
 				creatorId: creator.id,
 				limit: VIDEO_PAGE_SIZE
 			};
-			if (typeof fetchAfter === 'number' || (typeof fetchAfter === 'string' && fetchAfter !== '')) {
+			if (
+				append &&
+				((typeof fetchAfter === 'number' && fetchAfter > 0) ||
+					(typeof fetchAfter === 'string' && fetchAfter !== ''))
+			) {
 				requestPayload.fetchAfter = fetchAfter;
 			}
 			if (searchTerm) {
@@ -623,6 +680,11 @@ class AppBase extends Component {
 			}
 			const response = await ls2Call('creatorContent', requestPayload);
 			const responseBody = (response && response.body) || {};
+			if (responseBody && (responseBody.errorText || responseBody.errorMessage || responseBody.message)) {
+				this.setAppState({
+					errorMessage: responseBody.errorText || responseBody.errorMessage || responseBody.message
+				});
+			}
 			const items = Array.isArray(responseBody.items) ? responseBody.items : [];
 			const mappedVideos = items.map((item) => normalizeVideo(item, creator)).filter((video) => video.id);
 			const pagination = responseBody.pageInfo || responseBody.page || responseBody.paging || null;
@@ -669,15 +731,16 @@ class AppBase extends Component {
 						});
 					}
 				});
-				const channels = Array.from(channelMap.values());
-				const currentSelectedVideoId = append && prev.selectedVideo ? prev.selectedVideo.id : null;
-				const nextSelectedVideo =
-					append && currentSelectedVideoId
-						? mergedVideos.find((video) => video.id === currentSelectedVideoId) || prev.selectedVideo || null
-						: mergedVideos[0] || null;
-				const nextSelectedIndex = nextSelectedVideo
-					? mergedVideos.findIndex((video) => video.id === nextSelectedVideo.id)
-					: -1;
+			const channels = Array.from(channelMap.values());
+			const currentSelectedVideoId = append && prev.selectedVideo ? prev.selectedVideo.id : null;
+			const defaultVideo = findFirstPlayableVideo(mergedVideos);
+			const nextSelectedVideo =
+				append && currentSelectedVideoId
+					? mergedVideos.find((video) => video.id === currentSelectedVideoId) || prev.selectedVideo || defaultVideo
+					: defaultVideo;
+			const nextSelectedIndex = nextSelectedVideo
+				? mergedVideos.findIndex((video) => video.id === nextSelectedVideo.id)
+				: -1;
 				const selectedChannelId =
 					prev.selectedChannelId && channelMap.has(prev.selectedChannelId)
 						? prev.selectedChannelId
@@ -718,6 +781,10 @@ class AppBase extends Component {
 					selectedChannelId,
 					liveReplay
 				};
+			}, () => {
+				if (!append) {
+					this.queueFocusFirstVideo();
+				}
 			});
 		} catch (error) {
 			this.setState({
@@ -775,6 +842,12 @@ class AppBase extends Component {
 		const {selectedVideo} = this.state;
 		if (!selectedVideo || !selectedVideo.id) {
 			this.setAppState({playerError: 'Select a video before attempting playback.'});
+			return;
+		}
+		if (!selectedVideo.attachmentId && (!selectedVideo.videoAttachments || !selectedVideo.videoAttachments.length)) {
+			this.setAppState({
+				playerError: 'This post does not include a playable video.'
+			});
 			return;
 		}
 
@@ -948,6 +1021,39 @@ class AppBase extends Component {
 		this.fetchCreatorContent(selectedCreator, selectedCreatorIndex, {append: true});
 	};
 
+	queueFocusFirstVideo = () => {
+		if (this.focusTimeout) {
+			clearTimeout(this.focusTimeout);
+		}
+		this.focusTimeout = setTimeout(() => {
+			this.focusTimeout = null;
+			this.focusFirstVideo();
+		}, 0);
+	};
+
+	focusFirstVideo = () => {
+		if (!this.state.videos.length || this.state.showPlayer) {
+			return;
+		}
+		if (Spotlight.getPointerMode()) {
+			Spotlight.setPointerMode(false);
+		}
+		if (Spotlight.isPaused && Spotlight.isPaused()) {
+			Spotlight.resume();
+		}
+		const containerId = 'videoGridContainer';
+		const targetId = 'videoCard-0';
+		Spotlight.setContainerDefault(containerId, targetId);
+		Spotlight.setActiveContainer(containerId);
+		let focused = Spotlight.focus(targetId);
+		if (!focused && typeof document !== 'undefined') {
+			const node = document.querySelector(`[data-spotlight-id="${targetId}"]`);
+			if (node) {
+				Spotlight.focus(node);
+			}
+		}
+	};
+
 	handleChannelFilter = (channelIdOrEvent) => {
 		let channelId = channelIdOrEvent;
 		if (channelIdOrEvent && channelIdOrEvent.currentTarget) {
@@ -974,15 +1080,18 @@ class AppBase extends Component {
 			const nextSelectedIndex = nextSelectedVideo
 				? prev.videos.findIndex((video) => video.id === nextSelectedVideo.id)
 				: -1;
-			return {
+			const result = {
 				selectedChannelId: normalizedChannelId,
 				selectedVideo: nextSelectedVideo,
 				selectedVideoIndex: nextSelectedIndex
 			};
+			return result;
+		}, () => {
+			this.queueFocusFirstVideo();
 		});
 	};
 
-	renderHero() {
+	renderHeroSection() {
 		const {selectedCreator, creatorDetails} = this.state;
 		if (!selectedCreator) {
 			return null;
@@ -1013,7 +1122,7 @@ class AppBase extends Component {
 		const postCount = creatorDetails && creatorDetails.postCount;
 
 		return (
-			<div className="creatorHero">
+			<div className="creatorHero creatorHero--compact">
 				<div
 					className="creatorHero__cover"
 					style={
@@ -1054,7 +1163,7 @@ class AppBase extends Component {
 		);
 	}
 
-	renderViewTabs() {
+	renderViewTabs(orientation = 'horizontal') {
 		const tabs = [
 			{id: 'home', label: 'Home'},
 			{id: 'live', label: 'Live'},
@@ -1062,15 +1171,19 @@ class AppBase extends Component {
 			{id: 'about', label: 'About'}
 		];
 		const {view} = this.state;
+		const containerClass = orientation === 'vertical' ? 'viewTabs viewTabs--vertical' : 'viewTabs';
+		const buttonClass = orientation === 'vertical' ? 'viewTab viewTab--vertical' : 'viewTab';
 		return (
-			<div className="viewTabs">
-				{tabs.map((tab) => (
+			<div className={containerClass}>
+				{tabs.map((tab, index) => (
 					<Button
 						key={tab.id}
-						className={`viewTab${view === tab.id ? ' viewTab--active' : ''}`}
+						className={`${buttonClass}${view === tab.id ? ' viewTab--active' : ''}`}
 						selected={view === tab.id}
 						onClick={() => this.setView(tab.id)}
 						size="small"
+						data-spotlight-id={orientation === 'vertical' ? `nav-item-${tab.id}` : undefined}
+						data-spotlight-default={orientation === 'vertical' && index === 0 ? true : undefined}
 					>
 						{tab.label}
 					</Button>
@@ -1096,6 +1209,7 @@ class AppBase extends Component {
 						}}
 						iconAfter="search"
 						size="large"
+						spotlightDisabled
 					/>
 					{hasSearch ? (
 						<Button className="searchClear" size="small" icon="closex" onClick={this.clearSearch}>
@@ -1107,18 +1221,24 @@ class AppBase extends Component {
 		);
 	}
 
-	renderChannelFilters() {
+	renderChannelFilters(orientation = 'horizontal') {
 		const {channels, selectedChannelId} = this.state;
 		if (!channels.length) {
 			return null;
 		}
+		const containerClass =
+			orientation === 'vertical' ? 'channelPills channelPills--vertical' : 'channelPills';
+		const buttonClass = orientation === 'vertical' ? 'channelButton channelButton--vertical' : 'channelButton';
 		return (
-			<div className="channelPills">
+			<div className={containerClass}>
 				<Button
 					size="small"
 					selected={!selectedChannelId}
 					data-channel-id=""
 					onClick={this.handleChannelFilter}
+					className={buttonClass}
+					data-spotlight-id={orientation === 'vertical' ? 'channel-all' : undefined}
+					data-spotlight-default={orientation === 'vertical' ? true : undefined}
 				>
 					All content
 				</Button>
@@ -1129,6 +1249,9 @@ class AppBase extends Component {
 						selected={selectedChannelId === channel.id}
 						data-channel-id={channel.id || ''}
 						onClick={this.handleChannelFilter}
+						className={buttonClass}
+						data-spotlight-id={orientation === 'vertical' ? `channel-${channel.id}` : undefined}
+						data-spotlight-default={false}
 					>
 						{channel.title}
 					</Button>
@@ -1137,17 +1260,25 @@ class AppBase extends Component {
 		);
 	}
 
-	renderVideoCard(video) {
+	renderVideoCard(video, restProps = {}) {
 		const isSelected = this.state.selectedVideo && video.id === this.state.selectedVideo.id;
+		const {className: restClassName, key: renderKey, index, ...rest} = restProps;
+		const spotlightId = rest['data-spotlight-id'] || `videoCard-${typeof index === 'number' ? index : video.id}`;
+		const compositeClassName = ['videoCard', restClassName, isSelected ? 'videoCard--selected' : '']
+			.filter(Boolean)
+			.join(' ');
 		const wanBadge =
 			video.tags &&
 			video.tags.some((tag) => String(tag).toLowerCase().includes('wan')) &&
 			!video.isLive;
 		return (
-			<div
-				key={video.id}
-				className={`videoCard${isSelected ? ' videoCard--selected' : ''}`}
+			<FocusableCard
+				{...rest}
+				key={renderKey || video.id}
+				className={compositeClassName}
 				data-id={video.id}
+				data-spotlight-id={spotlightId}
+				role="button"
 				onClick={this.handleVideoActivate}
 			>
 				<div
@@ -1167,8 +1298,23 @@ class AppBase extends Component {
 					{video.publishedAt ? <span className="badge badge--muted">{formatDateTime(video.publishedAt)}</span> : null}
 				</div>
 				{video.description ? <BodyText>{video.description}</BodyText> : null}
-			</div>
+			</FocusableCard>
 		);
+	}
+
+	renderVideoItem({index, data, ...rest}) {
+		const videos = data || this.state.videos;
+		const video = videos && videos[index];
+		if (!video) {
+			return null;
+		}
+		return this.renderVideoCard(video, {
+			...rest,
+			index,
+			key: `${video.id}-${index}`,
+			'data-spotlight-id': `videoCard-${index}`,
+			'data-spotlight-default': index === 0 ? true : undefined
+		});
 	}
 
 	renderVideosGrid() {
@@ -1180,32 +1326,45 @@ class AppBase extends Component {
 			playerError,
 			hasMoreVideos,
 			selectedChannelId,
-			searchAppliedTerm
+			searchAppliedTerm,
+			errorMessage
 		} = this.state;
 		const visibleVideos = selectedChannelId
 			? videos.filter((video) => video.channel && video.channel.id === selectedChannelId)
 			: videos;
+		this.visibleVideosCache = visibleVideos;
 
 		const showSpinner = loadingVideos && !visibleVideos.length;
 		const showLoadMore = hasMoreVideos && !loadingVideos;
 
 		return (
 			<div className="contentSection">
-				{this.renderChannelFilters()}
-
 				{showSpinner ? (
 					<div className="columnPlaceholder">
 						<Spinner size="medium" show centered />
 						<BodyText>{searchAppliedTerm ? `Searching “${searchAppliedTerm}”…` : 'Loading content…'}</BodyText>
 					</div>
 				) : visibleVideos.length ? (
-					<Scroller verticalScrollbar="visible" className="videoScroller">
-						<div className="videoGrid">{visibleVideos.map((video) => this.renderVideoCard(video))}</div>
-					</Scroller>
+					<VirtualGridList
+						className="videoVirtualGrid"
+						data={visibleVideos}
+						dataSize={visibleVideos.length}
+						itemRenderer={this.renderVideoItem}
+						itemSize={{minWidth: 400, minHeight: 320}}
+						spotlightId="videoGridContainer"
+						spotlightPrevLeft="sideNav"
+						spotlightNextLeft="sideNav"
+						enterTo="default-element"
+						spacing={18}
+						focusableScrollbar
+						style={{height: '100%', minHeight: 0}}
+					/>
 				) : (
 					<div className="columnPlaceholder">
 						<BodyText>
-							{searchAppliedTerm
+							{errorMessage
+								? errorMessage
+								: searchAppliedTerm
 								? `No posts matched “${searchAppliedTerm}”.`
 								: selectedChannelId
 								? 'No videos available for this channel yet.'
@@ -1443,7 +1602,7 @@ class AppBase extends Component {
 		return (
 			<Panel>
 				<Header title="Floatplane TV" subtitle={subtitle} />
-				<div className="appPanelBody homePanelBody">
+				<div className="appPanelBody homePanelBody homePanelBody--twoPane">
 					{loadingCreators && !creators.length ? (
 						<div className="loadingCreators">
 							<Spinner show centered />
@@ -1451,18 +1610,36 @@ class AppBase extends Component {
 						</div>
 					) : (
 						<>
-							{this.renderHero()}
-							{this.renderViewTabs()}
-							{this.renderSearchRow()}
-							{this.renderStatusBar()}
-							{this.renderMainContent()}
+							<div
+								className="homeSideNav"
+								data-spotlight-container="true"
+								data-spotlight-id="sideNav"
+								data-spotlight-default-element="nav-item-home"
+								data-spotlight-next-right="videoGridContainer"
+							>
+								<div className="sideNav__section">
+									{this.renderSearchRow()}
+								</div>
+								<div className="sideNav__section">
+									<Heading size="tiny">Sections</Heading>
+									{this.renderViewTabs('vertical')}
+								</div>
+								<div className="sideNav__section">
+									<Heading size="tiny">Channels</Heading>
+									{this.renderChannelFilters('vertical')}
+								</div>
+								<div className="sideNav__grow" />
+								<Button className="sideNav__logout" onClick={this.handleLogout} size="small">
+									Log Out
+								</Button>
+							</div>
+							<div className="homeMain" data-spotlight-prev-left="sideNav">
+								{this.renderHeroSection()}
+								{this.renderStatusBar()}
+								<div className="homeMain__content">{this.renderMainContent()}</div>
+							</div>
 						</>
 					)}
-					<div className="homeFooter">
-						<Button onClick={this.handleLogout} size="large">
-							Log Out
-						</Button>
-					</div>
 				</div>
 				{this.renderCreatorPicker()}
 			</Panel>

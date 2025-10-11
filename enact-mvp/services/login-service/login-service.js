@@ -123,6 +123,12 @@ function respondError(message, errorText, statusCode, extra) {
 
 function performRequest(method, pathName, options) {
 	const opts = options || {};
+	logDebug('http_request', {
+		method,
+		path: pathName,
+		payload: opts.payload ? Object.keys(opts.payload) : null,
+		hasCookies: Boolean((opts.cookies && opts.cookies.length) || (sessionState && sessionState.cookieHeader))
+	});
 	return new Promise((resolve, reject) => {
 		const data = opts.payload ? JSON.stringify(opts.payload) : null;
 		const headers = {
@@ -166,6 +172,22 @@ function performRequest(method, pathName, options) {
 					parsedBody = {message: body};
 				}
 				const responseCookies = res.headers && res.headers['set-cookie'] ? res.headers['set-cookie'] : [];
+				logDebug('http_response', {
+					method,
+					path: pathName,
+					statusCode: res.statusCode,
+					bodyKeys: parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody) ? Object.keys(parsedBody) : null,
+					bodyType: Array.isArray(parsedBody) ? 'array' : typeof parsedBody,
+					cookieCount: responseCookies.length
+				});
+				if (res.statusCode >= 400) {
+					logDebug('http_error_body', {
+						method,
+						path: pathName,
+						statusCode: res.statusCode,
+						body: parsedBody
+					});
+				}
 				resolve({
 					statusCode: res.statusCode,
 					body: parsedBody,
@@ -417,6 +439,7 @@ service.register('login', async (message) => {
 		const response = await performRequest('POST', '/api/v2/auth/login', {payload: {username, password}});
 		if (response.statusCode >= 400) {
 			const responseMsg = response.body && response.body.message ? response.body.message : 'Login failed';
+			logDebug('login_failed', {statusCode: response.statusCode, body: response.body});
 			respondError(message, responseMsg, response.statusCode, {body: response.body});
 			return;
 		}
@@ -454,6 +477,7 @@ service.register('factor', async (message) => {
 		if (response.statusCode >= 400) {
 			const responseMsg =
 				response.body && response.body.message ? response.body.message : 'Two-factor verification failed';
+			logDebug('two_factor_failed', {statusCode: response.statusCode, body: response.body});
 			respondError(message, responseMsg, response.statusCode, {body: response.body});
 			return;
 		}
@@ -489,6 +513,7 @@ service.register('subscriptions', async (message) => {
 		if (!(payload.hasOwnProperty('active') && payload.active === false)) {
 			querySuffix = '?active=true';
 		}
+		logDebug('subscriptions_request', {querySuffix});
 		const response = await performRequest('GET', '/api/v3/user/subscriptions' + querySuffix);
 		if (response.cookies && response.cookies.length) {
 			applySetCookieCookies(response.cookies);
@@ -561,11 +586,23 @@ service.register('creatorContent', async (message) => {
 			searchParams.push('tags[' + tagIndex + ']=' + encodeURIComponent(tag));
 		});
 	}
-	if (fetchAfterValue !== undefined && fetchAfterValue !== null && String(fetchAfterValue) !== '') {
+	if (typeof fetchAfterValue === 'number') {
+		if (fetchAfterValue > 0) {
+			searchParams.push('fetchAfter=' + encodeURIComponent(fetchAfterValue));
+		}
+	} else if (fetchAfterValue !== undefined && fetchAfterValue !== null && String(fetchAfterValue) !== '') {
 		searchParams.push('fetchAfter=' + encodeURIComponent(fetchAfterValue));
 	}
 	const query = searchParams.join('&');
 	try {
+		logDebug('creator_content_request', {
+			creatorId,
+			limit,
+			fetchAfter: fetchAfterValue,
+			search: payload.search,
+			channel: payload.channel,
+			hasVideo: payload.hasOwnProperty('hasVideo') ? payload.hasVideo : true
+		});
 		const response = await performRequest('GET', '/api/v3/content/creator?' + query);
 		if (response.cookies && response.cookies.length) {
 			applySetCookieCookies(response.cookies);
