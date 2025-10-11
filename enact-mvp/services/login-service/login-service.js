@@ -554,7 +554,8 @@ service.register('creatorContent', async (message) => {
 	const hasFetchAfter = Object.prototype.hasOwnProperty.call(payload, 'fetchAfter');
 	const fetchAfterValue = hasFetchAfter ? payload.fetchAfter : undefined;
 	const searchParams = ['id=' + encodeURIComponent(creatorId), 'limit=' + limit];
-	if (!(payload.hasOwnProperty('hasVideo') && payload.hasVideo === false)) {
+	// Note: hasVideo parameter removed as it causes 400 errors from the Floatplane API
+	if (payload.hasOwnProperty('hasVideo') && payload.hasVideo === true) {
 		searchParams.push('hasVideo=true');
 	}
 	if (payload.hasOwnProperty('hasAudio')) {
