@@ -181,11 +181,21 @@ function performRequest(method, pathName, options) {
 					cookieCount: responseCookies.length
 				});
 				if (res.statusCode >= 400) {
+					let bodyPreview = parsedBody;
+					if (parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)) {
+						bodyPreview = {
+							message: parsedBody.message || null,
+							errors: parsedBody.errors || null,
+							keys: Object.keys(parsedBody)
+						};
+					} else if (typeof parsedBody === 'string') {
+						bodyPreview = parsedBody.slice(0, 500);
+					}
 					logDebug('http_error_body', {
 						method,
 						path: pathName,
 						statusCode: res.statusCode,
-						body: parsedBody
+						body: bodyPreview
 					});
 				}
 				resolve({
@@ -550,12 +560,11 @@ service.register('creatorContent', async (message) => {
 		respondError(message, 'creatorId is required', 400);
 		return;
 	}
-	const limit = typeof payload.limit === 'number' ? Math.min(Math.max(payload.limit, 1), 50) : 20;
+	const limit = typeof payload.limit === 'number' ? Math.min(Math.max(payload.limit, 1), 20) : 20;
 	const hasFetchAfter = Object.prototype.hasOwnProperty.call(payload, 'fetchAfter');
 	const fetchAfterValue = hasFetchAfter ? payload.fetchAfter : undefined;
 	const searchParams = ['id=' + encodeURIComponent(creatorId), 'limit=' + limit];
-	// Note: hasVideo parameter removed as it causes 400 errors from the Floatplane API
-	if (payload.hasOwnProperty('hasVideo') && payload.hasVideo === true) {
+	if (!(payload.hasOwnProperty('hasVideo') && payload.hasVideo === false)) {
 		searchParams.push('hasVideo=true');
 	}
 	if (payload.hasOwnProperty('hasAudio')) {
@@ -698,20 +707,74 @@ service.register('videoDelivery', async (message) => {
 			}
 		}
 
-		const deliveryResponse = await performRequest('GET', '/api/v3/delivery/info?entityId=' + encodeURIComponent(attachmentId));
-		if (deliveryResponse.cookies && deliveryResponse.cookies.length) {
-			applySetCookieCookies(deliveryResponse.cookies);
+		const allowedScenarios = ['download', 'live', 'onDemand'];
+		let scenario = payload && typeof payload.scenario === 'string' ? payload.scenario.trim() : '';
+		if (!allowedScenarios.includes(scenario)) {
+			scenario = payload && payload.isLive ? 'live' : 'download';
 		}
-		const sources = extractSourcesFromBody(deliveryResponse.body);
+
+		const preference = [];
+		if (scenario === 'live') {
+			preference.push('live', 'onDemand', 'download');
+		} else {
+			preference.push(scenario, 'download', 'onDemand', 'live');
+		}
+		const tried = new Set();
+		let deliveryResponse = null;
+		let sources = [];
+		let usedScenario = null;
+
+		for (let i = 0; i < preference.length; i += 1) {
+			const candidate = preference[i];
+			if (tried.has(candidate)) {
+				continue;
+			}
+			tried.add(candidate);
+			const deliveryQuery = [
+				'entityId=' + encodeURIComponent(attachmentId),
+				'scenario=' + encodeURIComponent(candidate)
+			].join('&');
+			try {
+				const response = await performRequest('GET', '/api/v3/delivery/info?' + deliveryQuery);
+				if (response.cookies && response.cookies.length) {
+					applySetCookieCookies(response.cookies);
+				}
+				const extracted = extractSourcesFromBody(response.body);
+				if (extracted && extracted.length) {
+					deliveryResponse = response;
+					sources = extracted;
+					usedScenario = candidate;
+					break;
+				}
+				if (!deliveryResponse) {
+					deliveryResponse = response;
+				}
+			} catch (attemptError) {
+				if (!deliveryResponse) {
+					deliveryResponse = {
+						statusCode: attemptError.statusCode || 500,
+						body: {message: attemptError.message}
+					};
+				}
+			}
+		}
+
+		if (!deliveryResponse) {
+			throw new Error('Delivery request failed');
+		}
+
 		logDebug('video_delivery_result', {
 			attachmentId,
 			videoId,
-			sourceCount: sources.length
+			sourceCount: sources.length,
+			scenarioAttempted: scenario,
+			scenarioUsed: usedScenario
 		});
 		respondSuccess(message, {
 			statusCode: deliveryResponse.statusCode,
 			body: {
-				sources
+				sources,
+				scenario: usedScenario || scenario
 			},
 			cookieHeader: sessionState ? sessionState.cookieHeader : null
 		});

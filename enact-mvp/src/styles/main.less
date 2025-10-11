@@ -85,7 +85,10 @@ body {
 }
 
 .playerPanelBody {
-	gap: 16px;
+	gap: 24px;
+	align-items: center;
+	justify-content: flex-start;
+	padding: 24px;
 }
 
 .loadingCreators {
@@ -453,7 +456,8 @@ body {
 }
 
 .playerContainer {
-	margin: 24px auto;
+	position: relative;
+	margin: 0 auto;
 	padding: 12px;
 	border-radius: 20px;
 	background: rgba(0, 0, 0, 0.65);
@@ -461,9 +465,9 @@ body {
 	align-items: center;
 	justify-content: center;
 	min-height: 0;
-	flex: 1;
-	width: calc(100% - 64px);
-	max-width: 1920px;
+	flex: 0 0 auto;
+	width: 100%;
+	max-width: 1440px;
 }
 
 .playerPlaceholder {
@@ -485,9 +489,12 @@ body {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 0 24px 24px;
+	padding: 0;
+	margin-top: 16px;
 	gap: 24px;
 	flex-wrap: wrap;
+	width: 100%;
+	max-width: 1440px;
 }
 
 .qualitySelector {

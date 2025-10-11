@@ -175,6 +175,26 @@ const normalizeVideo = (item = {}, creator = null) => {
 	const channel = item.channel || null;
 	const attachmentId = extractAttachmentId(videoAttachments);
 	const metadata = item.metadata || item.rawMetadata || {};
+	const hasVideoAttachment =
+		Boolean(attachmentId) ||
+		(Array.isArray(videoAttachments) && videoAttachments.length > 0) ||
+		Boolean(
+			item.attachments &&
+			item.attachments.some(
+				(attachment) =>
+					attachment &&
+					attachment.type &&
+					String(attachment.type).toLowerCase().includes('video') &&
+					(attachment.url || (attachment.sources && attachment.sources.length))
+			)
+		);
+	const isPlayable = Boolean(
+		hasVideoAttachment ||
+		item.hasVideo ||
+		item.isVideo ||
+		item.type === 'video' ||
+		(metadata && (metadata.hasVideo || metadata.videoCount > 0))
+	);
 	return {
 		id: item.id || item.guid || item.slug || null,
 		title: item.title || item.name || item.heading || 'Untitled post',
@@ -203,14 +223,12 @@ const normalizeVideo = (item = {}, creator = null) => {
 		attachments: item.attachments || [],
 		raw: item,
 		creatorId: (creator && creator.id) || extractCreatorId(channel) || null,
-		tags: item.tags || metadata.tags || []
+		tags: item.tags || metadata.tags || [],
+		isPlayable
 	};
 };
 
-const findFirstPlayableVideo = (videos = []) =>
-	videos.find((video) => video && (video.attachmentId || (video.videoAttachments && video.videoAttachments.length))) ||
-	videos[0] ||
-	null;
+const findFirstPlayableVideo = (videos = []) => videos.find((video) => video && video.isPlayable) || videos[0] || null;
 
 const guessMimeType = (url) => {
 	if (!url) {
@@ -329,6 +347,9 @@ class AppBase extends Component {
 	videoRef = createRef();
 	videoEventHandlers = [];
 	focusTimeout = null;
+	playerFocusTimeout = null;
+	globalKeyHandler = null;
+	playerBackButtonNode = null;
 	constructor(props) {
 		super(props);
 		this.renderVideoItem = this.renderVideoItem.bind(this);
@@ -348,6 +369,10 @@ class AppBase extends Component {
 		this.attachVideoListeners();
 		this.safeSetContainerDefault('sideNav', 'nav-item-home');
 		this.safeSetContainerDefault('videoGridContainer', 'videoCard-0');
+		this.globalKeyHandler = (event) => this.handleGlobalKeyDown(event);
+		if (typeof document !== 'undefined') {
+			document.addEventListener('keydown', this.globalKeyHandler, true);
+		}
 	}
 
 	componentDidUpdate(prevProps, prevState) {
@@ -358,6 +383,7 @@ class AppBase extends Component {
 		if ((sourceChanged || toggledPlayer) && this.state.showPlayer) {
 			this.attachVideoListeners();
 			this.triggerVideoPlayback();
+			this.focusPlayerControls();
 		}
 		const channelsChanged = prevState.channels !== this.state.channels || prevState.channels.length !== this.state.channels.length;
 		if (channelsChanged) {
@@ -392,6 +418,14 @@ class AppBase extends Component {
 		if (this.focusTimeout) {
 			clearTimeout(this.focusTimeout);
 			this.focusTimeout = null;
+		}
+		if (this.playerFocusTimeout) {
+			clearTimeout(this.playerFocusTimeout);
+			this.playerFocusTimeout = null;
+		}
+		if (this.globalKeyHandler && typeof document !== 'undefined') {
+			document.removeEventListener('keydown', this.globalKeyHandler, true);
+			this.globalKeyHandler = null;
 		}
 	}
 
@@ -964,7 +998,16 @@ class AppBase extends Component {
 			if (!attachmentId) {
 				throw new Error('Video attachment identifier not available.');
 			}
-			const response = await ls2Call('videoDelivery', {attachmentId, videoId: video.id});
+			const isLiveVideo = Boolean(video && video.isLive);
+			const deliveryPayload = {
+				attachmentId,
+				videoId: video.id,
+				isLive: isLiveVideo
+			};
+			if (isLiveVideo) {
+				deliveryPayload.scenario = 'live';
+			}
+			const response = await ls2Call('videoDelivery', deliveryPayload);
 			const sources =
 				response && response.body && Array.isArray(response.body.sources) ? response.body.sources : [];
 			const normalizedSources = normalizeSources(sources, video);
@@ -1051,6 +1094,80 @@ class AppBase extends Component {
 			if (node) {
 				Spotlight.focus(node);
 			}
+		}
+	};
+
+	focusPlayerControls = () => {
+		if (!this.state.showPlayer) {
+			return;
+		}
+		if (this.playerFocusTimeout) {
+			clearTimeout(this.playerFocusTimeout);
+		}
+		this.playerFocusTimeout = setTimeout(() => {
+			this.playerFocusTimeout = null;
+			try {
+				if (Spotlight.getPointerMode && Spotlight.getPointerMode()) {
+					Spotlight.setPointerMode(false);
+				}
+				if (Spotlight.resume && Spotlight.isPaused && Spotlight.isPaused()) {
+					Spotlight.resume();
+				}
+				if (Spotlight.setContainerDefault) {
+					Spotlight.setContainerDefault('playerControls', 'player-back-button');
+				}
+				if (Spotlight.setActiveContainer) {
+					Spotlight.setActiveContainer('playerControls');
+				}
+				let focused = false;
+				if (Spotlight.focus) {
+					focused = Spotlight.focus('player-back-button');
+				}
+				if (!focused) {
+					const backButton = this.playerBackButtonNode;
+					if (backButton) {
+						const node =
+							typeof backButton.nodeRef === 'object' && backButton.nodeRef
+								? backButton.nodeRef.current || backButton.nodeRef
+								: backButton;
+						if (node && typeof node.focus === 'function') {
+							node.focus();
+							focused = true;
+						}
+					}
+				}
+				if (!focused && typeof document !== 'undefined') {
+					const node = document.querySelector('[data-spotlight-id=\"player-back-button\"]');
+					if (node && typeof node.focus === 'function') {
+						node.focus();
+					}
+				}
+			} catch (error) {
+				// ignore focus errors
+			}
+		}, 0);
+	};
+
+	handleGlobalKeyDown = (event) => {
+		if (!event) {
+			return;
+		}
+		const keyCode = typeof event.keyCode === 'number' ? event.keyCode : event.detail && event.detail.keyCode;
+		const keyName = event.key || '';
+		const isBack =
+			keyCode === 461 ||
+			keyCode === 8 ||
+			keyName === 'Backspace' ||
+			keyName === 'Escape' ||
+			keyName === 'WebOSBack' ||
+			keyName === 'webOSBack';
+		if (isBack && this.state.showPlayer) {
+			event.preventDefault();
+			event.stopPropagation();
+			if (typeof event.stopImmediatePropagation === 'function') {
+				event.stopImmediatePropagation();
+			}
+			this.handleStopPlayback();
 		}
 	};
 
@@ -1264,14 +1381,10 @@ class AppBase extends Component {
 		const isSelected = this.state.selectedVideo && video.id === this.state.selectedVideo.id;
 		const {className: restClassName, key: renderKey, index, ...rest} = restProps;
 		const spotlightId = rest['data-spotlight-id'] || `videoCard-${typeof index === 'number' ? index : video.id}`;
-		const compositeClassName = ['videoCard', restClassName, isSelected ? 'videoCard--selected' : '']
-			.filter(Boolean)
-			.join(' ');
-		const wanBadge =
-			video.tags &&
-			video.tags.some((tag) => String(tag).toLowerCase().includes('wan')) &&
-			!video.isLive;
-		return (
+	const compositeClassName = ['videoCard', restClassName, isSelected ? 'videoCard--selected' : '']
+		.filter(Boolean)
+		.join(' ');
+	return (
 			<FocusableCard
 				{...rest}
 				key={renderKey || video.id}
@@ -1287,17 +1400,19 @@ class AppBase extends Component {
 				>
 					{!video.thumbnail ? 'No preview available' : null}
 					{video.isLive ? <span className="liveBadge">LIVE</span> : null}
-					{wanBadge ? <span className="wanBadge">WAN</span> : null}
 				</div>
 				<Heading size="tiny" className="videoTitle">
 					{video.title}
 				</Heading>
 				<div className="videoMeta">
 					{video.channel ? <span className="badge badge--channel">{video.channel.title}</span> : null}
+					{video.isLive ? <span className="badge badge--live">LIVE</span> : null}
 					{video.duration ? <span className="badge">{formatDuration(video.duration)}</span> : null}
 					{video.publishedAt ? <span className="badge badge--muted">{formatDateTime(video.publishedAt)}</span> : null}
 				</div>
-				{video.description ? <BodyText>{video.description}</BodyText> : null}
+				{!video.isPlayable ? (
+					<BodyText className="videoMeta__warning">No video attachment</BodyText>
+				) : null}
 			</FocusableCard>
 		);
 	}
@@ -1345,20 +1460,30 @@ class AppBase extends Component {
 						<BodyText>{searchAppliedTerm ? `Searching “${searchAppliedTerm}”…` : 'Loading content…'}</BodyText>
 					</div>
 				) : visibleVideos.length ? (
-					<VirtualGridList
-						className="videoVirtualGrid"
-						data={visibleVideos}
-						dataSize={visibleVideos.length}
-						itemRenderer={this.renderVideoItem}
-						itemSize={{minWidth: 400, minHeight: 320}}
-						spotlightId="videoGridContainer"
-						spotlightPrevLeft="sideNav"
-						spotlightNextLeft="sideNav"
-						enterTo="default-element"
-						spacing={18}
-						focusableScrollbar
-						style={{height: '100%', minHeight: 0}}
-					/>
+					<div className="videoArea">
+						<div className="videoGridWrapper">
+							<VirtualGridList
+								className="videoVirtualGrid"
+								data={visibleVideos}
+								dataSize={visibleVideos.length}
+								itemRenderer={this.renderVideoItem}
+								itemSize={{minWidth: 400, minHeight: 320}}
+								spotlightId="videoGridContainer"
+								spotlightPrevLeft="sideNav"
+								spotlightNextLeft="sideNav"
+								enterTo="default-element"
+								spacing={18}
+								focusableScrollbar
+							/>
+						</div>
+						{showLoadMore ? (
+							<div className="loadMoreRow">
+								<Button onClick={this.loadMoreVideos} size="large" disabled={loadingVideos}>
+									{loadingVideos ? 'Loading…' : 'Load More'}
+								</Button>
+							</div>
+						) : null}
+					</div>
 				) : (
 					<div className="columnPlaceholder">
 						<BodyText>
@@ -1388,10 +1513,17 @@ class AppBase extends Component {
 							<BodyText className="videoChannelLabel">{selectedVideo.channel.title}</BodyText>
 						) : null}
 						{selectedVideo.description ? <BodyText>{selectedVideo.description}</BodyText> : null}
-						<div className="videoActions">
-							<Button onClick={this.handlePlaySelected} size="large" disabled={videoLoading}>
-								{videoLoading ? 'Preparing stream…' : 'Play Video'}
-							</Button>
+					<div className="videoActions">
+						<Button
+							onClick={this.handlePlaySelected}
+							size="large"
+							disabled={videoLoading || !selectedVideo.isPlayable}
+						>
+							{videoLoading ? 'Preparing stream…' : selectedVideo.isPlayable ? 'Play Video' : 'Not Playable'}
+						</Button>
+							{!selectedVideo.isPlayable ? (
+								<BodyText className="errorText">No playable video for this post.</BodyText>
+							) : null}
 							{playerError ? <BodyText className="errorText">{playerError}</BodyText> : null}
 						</div>
 					</div>
@@ -1682,8 +1814,19 @@ class AppBase extends Component {
 							</div>
 						)}
 					</div>
-					<div className="playerControls">
-						<Button onClick={this.handleStopPlayback} size="large">
+					<div
+						className="playerControls"
+						data-spotlight-container="true"
+						data-spotlight-id="playerControls"
+					>
+						<Button
+							onClick={this.handleStopPlayback}
+							size="large"
+							data-spotlight-id="player-back-button"
+							componentRef={(node) => {
+								this.playerBackButtonNode = node;
+							}}
+						>
 							Back to Home
 						</Button>
 						{availableSources.length > 1 ? (
@@ -1700,6 +1843,9 @@ class AppBase extends Component {
 												key={`${label}-${source.url}`}
 												selected={isSelected}
 												data-quality={source.quality || ''}
+												data-spotlight-id={`quality-${(label || 'auto')
+													.toLowerCase()
+													.replace(/[^a-z0-9]+/g, '-')}`}
 												onClick={this.handleQualityActivate}
 												size="small"
 											>
