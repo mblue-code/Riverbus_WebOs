@@ -1572,36 +1572,13 @@ class AppBase extends Component {
 							{errorMessage
 								? errorMessage
 								: searchAppliedTerm
-								? `No posts matched “${searchAppliedTerm}”.`
+								? `No posts matched "${searchAppliedTerm}".`
 								: selectedChannelId
 								? 'No videos available for this channel yet.'
 								: 'Select a creator to load their recent posts.'}
 						</BodyText>
 					</div>
 				)}
-
-				{selectedVideo ? (
-					<div className="videoDetails">
-						<Heading size="small">{selectedVideo.title}</Heading>
-						{selectedVideo.channel ? (
-							<BodyText className="videoChannelLabel">{selectedVideo.channel.title}</BodyText>
-						) : null}
-						{selectedVideo.description ? <BodyText>{selectedVideo.description}</BodyText> : null}
-						<div className="videoActions">
-							<Button
-								onClick={this.handlePlaySelected}
-								size="large"
-								disabled={videoLoading || !selectedVideo.isPlayable}
-							>
-								{videoLoading ? 'Preparing stream…' : selectedVideo.isPlayable ? 'Play Video' : 'Not Playable'}
-							</Button>
-							{!selectedVideo.isPlayable ? (
-								<BodyText className="errorText">No playable video for this post.</BodyText>
-							) : null}
-							{playerError ? <BodyText className="errorText">{playerError}</BodyText> : null}
-						</div>
-					</div>
-				) : null}
 			</div>
 		);
 	}
