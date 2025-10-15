@@ -1580,14 +1580,6 @@ class AppBase extends Component {
 					</div>
 				)}
 
-				{showLoadMore ? (
-					<div className="loadMoreRow">
-						<Button onClick={this.loadMoreVideos} size="large" disabled={loadingVideos}>
-							{loadingVideos ? 'Loading…' : 'Load More'}
-						</Button>
-					</div>
-				) : null}
-
 				{selectedVideo ? (
 					<div className="videoDetails">
 						<Heading size="small">{selectedVideo.title}</Heading>
@@ -1595,14 +1587,14 @@ class AppBase extends Component {
 							<BodyText className="videoChannelLabel">{selectedVideo.channel.title}</BodyText>
 						) : null}
 						{selectedVideo.description ? <BodyText>{selectedVideo.description}</BodyText> : null}
-					<div className="videoActions">
-						<Button
-							onClick={this.handlePlaySelected}
-							size="large"
-							disabled={videoLoading || !selectedVideo.isPlayable}
-						>
-							{videoLoading ? 'Preparing stream…' : selectedVideo.isPlayable ? 'Play Video' : 'Not Playable'}
-						</Button>
+						<div className="videoActions">
+							<Button
+								onClick={this.handlePlaySelected}
+								size="large"
+								disabled={videoLoading || !selectedVideo.isPlayable}
+							>
+								{videoLoading ? 'Preparing stream…' : selectedVideo.isPlayable ? 'Play Video' : 'Not Playable'}
+							</Button>
 							{!selectedVideo.isPlayable ? (
 								<BodyText className="errorText">No playable video for this post.</BodyText>
 							) : null}

@@ -69,7 +69,7 @@ body {
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
+	gap: 12px;
 }
 
 .homeMain__content {
@@ -77,7 +77,7 @@ body {
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
+	gap: 12px;
 }
 
 .homeMain .statusBar {
@@ -102,14 +102,14 @@ body {
 
 .creatorHero {
 	position: relative;
-	min-height: 210px;
-	border-radius: 24px;
+	min-height: 150px;
+	border-radius: 20px;
 	overflow: hidden;
-	background-color: #1c1c1e;
+	background-color: rgba(28, 28, 30, 0.9);
 }
 
 .creatorHero--compact {
-	min-height: 210px;
+	min-height: 150px;
 }
 
 .creatorHero__cover {
@@ -132,8 +132,8 @@ body {
 	position: relative;
 	display: flex;
 	flex-direction: column;
-	gap: 18px;
-	padding: 28px;
+	gap: 12px;
+	padding: 18px 20px;
 }
 
 .creatorHero__header {
@@ -144,9 +144,9 @@ body {
 }
 
 .creatorHero__avatar {
-	width: 96px;
-	height: 96px;
-	border-radius: 24px;
+	width: 72px;
+	height: 72px;
+	border-radius: 20px;
 	background: rgba(255, 255, 255, 0.1);
 	display: flex;
 	align-items: center;
@@ -170,9 +170,9 @@ body {
 
 .creatorHero__stats {
 	display: flex;
-	gap: 16px;
-	color: rgba(255, 255, 255, 0.75);
-	font-size: 1rem;
+	gap: 12px;
+	color: rgba(255, 255, 255, 0.7);
+	font-size: 0.95rem;
 }
 
 .creatorHero__actions {
@@ -183,7 +183,12 @@ body {
 }
 
 .creatorHero__about {
-	max-width: 960px;
+	max-width: 840px;
+	color: rgba(255, 255, 255, 0.82);
+	font-size: 0.95rem;
+	line-height: 1.35;
+	max-height: 72px;
+	overflow: hidden;
 }
 
 .viewTabs {
@@ -244,7 +249,7 @@ body {
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 20px;
+	gap: 16px;
 }
 
 .videoArea {
@@ -413,12 +418,14 @@ body {
 }
 
 .videoDetails {
-	padding: 20px;
-	border-radius: 18px;
-	background: rgba(255, 255, 255, 0.05);
+	padding: 16px;
+	border-radius: 16px;
+	background: rgba(255, 255, 255, 0.04);
 	display: flex;
 	flex-direction: column;
-	gap: 14px;
+	gap: 12px;
+	max-height: 200px;
+	overflow-y: auto;
 }
 
 .videoActions {
