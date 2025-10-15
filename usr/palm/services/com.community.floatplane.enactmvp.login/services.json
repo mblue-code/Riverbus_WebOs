@@ -1,17 +1,44 @@
 {
-  "id": "com.community.floatplane.enactmvp.login",
-  "version": "0.1.0",
-  "vendor": "Community Floatplane",
-  "type": "webos-service",
-  "main": "login-service.js",
-  "services": [
-    {
-      "name": "login",
-      "description": "Authenticate with Floatplane"
-    },
-    {
-      "name": "factor",
-      "description": "Verify Floatplane two-factor token"
-    }
-  ]
+	"id": "com.community.floatplane.enactmvp.login",
+	"description": "Floatplane login service",
+	"services": [
+		{
+			"name": "com.community.floatplane.enactmvp.login",
+			"description": "Floatplane login service",
+			"commands": [
+				{
+					"name": "login",
+					"public": true
+				},
+				{
+					"name": "factor",
+					"public": true
+				},
+				{
+					"name": "status",
+					"public": true
+				},
+				{
+					"name": "logout",
+					"public": true
+				},
+				{
+					"name": "subscriptions",
+					"public": true
+				},
+				{
+					"name": "creatorContent",
+					"public": true
+				},
+				{
+					"name": "videoDelivery",
+					"public": true
+				},
+				{
+					"name": "creatorInfo",
+					"public": true
+				}
+			]
+		}
+	]
 }

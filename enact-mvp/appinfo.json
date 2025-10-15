@@ -10,6 +10,7 @@
 	"requiredVersion": "1.0.0",
 	"bgColor": "#000000",
 	"transparent": false,
+	"disableBackHistoryAPI": true,
 	"resolution": "1920x1080",
 	"services": [
 		{

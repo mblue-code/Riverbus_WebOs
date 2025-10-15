@@ -465,8 +465,8 @@ class AppBase extends Component {
 		this.videoEventHandlers = [];
 	}
 
-	setAppState(nextState) {
-		this.setState((prev) => Object.assign({}, prev, nextState));
+	setAppState(nextState, callback) {
+		this.setState((prev) => Object.assign({}, prev, nextState), callback);
 	}
 
 	async bootstrapSession() {
@@ -571,6 +571,50 @@ class AppBase extends Component {
 		this.fetchCreatorContent(creator, index);
 	};
 
+	openCreatorPicker = () => {
+		this.setAppState({showCreatorPicker: true}, () => {
+			const {creators} = this.state;
+			if (!creators || !creators.length) {
+				return;
+			}
+			try {
+				if (Spotlight.getPointerMode && Spotlight.getPointerMode()) {
+					Spotlight.setPointerMode(false);
+				}
+				if (Spotlight.isPaused && Spotlight.isPaused()) {
+					Spotlight.resume();
+				}
+				if (Spotlight.setContainerDefault) {
+					Spotlight.setContainerDefault('creatorPickerOverlay', 'creatorPickerItem-0');
+				}
+				if (Spotlight.setActiveContainer) {
+					Spotlight.setActiveContainer('creatorPickerOverlay');
+				}
+			} catch (error) {
+				// ignore spotlight errors
+			}
+			this.focusSpotlightTarget('creatorPickerItem-0', '[data-spotlight-id="creatorPickerItem-0"], [data-index="0"]');
+		});
+	};
+
+	closeCreatorPicker = ({focusTarget = 'switchCreatorButton'} = {}) => {
+		this.setAppState({showCreatorPicker: false}, () => {
+			try {
+				if (Spotlight.getPointerMode && Spotlight.getPointerMode()) {
+					Spotlight.setPointerMode(false);
+				}
+				if (Spotlight.isPaused && Spotlight.isPaused()) {
+					Spotlight.resume();
+				}
+			} catch (error) {
+				// ignore spotlight errors
+			}
+			if (focusTarget) {
+				this.focusSpotlightTarget(focusTarget);
+			}
+		});
+	};
+
 	handleCreatorSelect = (index) => {
 		const {creators} = this.state;
 		if (index < 0 || index >= creators.length) {
@@ -578,9 +622,7 @@ class AppBase extends Component {
 		}
 		const creator = creators[index];
 		this.initializeCreator(creator, index);
-		this.setAppState({
-			showCreatorPicker: false
-		});
+		this.closeCreatorPicker();
 	};
 
 	handleCreatorActivate = (event) => {
@@ -1097,6 +1139,29 @@ class AppBase extends Component {
 		}
 	};
 
+	focusSpotlightTarget = (spotlightId, fallbackSelector) => {
+		let focused = false;
+		try {
+			if (spotlightId && Spotlight.focus) {
+				focused = Spotlight.focus(spotlightId);
+			}
+			if (!focused && typeof document !== 'undefined') {
+				const selector =
+					fallbackSelector || (spotlightId ? `[data-spotlight-id="${spotlightId}"]` : null);
+				if (selector) {
+					const node = document.querySelector(selector);
+					if (node && typeof node.focus === 'function') {
+						node.focus();
+						focused = true;
+					}
+				}
+			}
+		} catch (error) {
+			// ignore focus errors
+		}
+		return focused;
+	};
+
 	focusPlayerControls = () => {
 		if (!this.state.showPlayer) {
 			return;
@@ -1161,13 +1226,25 @@ class AppBase extends Component {
 			keyName === 'Escape' ||
 			keyName === 'WebOSBack' ||
 			keyName === 'webOSBack';
-		if (isBack && this.state.showPlayer) {
+		if (!isBack) {
+			return;
+		}
+		if (this.state.showPlayer) {
 			event.preventDefault();
 			event.stopPropagation();
 			if (typeof event.stopImmediatePropagation === 'function') {
 				event.stopImmediatePropagation();
 			}
 			this.handleStopPlayback();
+			return;
+		}
+		if (this.state.showCreatorPicker) {
+			event.preventDefault();
+			event.stopPropagation();
+			if (typeof event.stopImmediatePropagation === 'function') {
+				event.stopImmediatePropagation();
+			}
+			this.closeCreatorPicker();
 		}
 	};
 
@@ -1262,7 +1339,12 @@ class AppBase extends Component {
 							</div>
 						</div>
 						<div className="creatorHero__actions">
-							<Button size="small" icon="list" onClick={() => this.setAppState({showCreatorPicker: true})}>
+							<Button
+								size="small"
+								icon="list"
+								onClick={this.openCreatorPicker}
+								data-spotlight-id="switchCreatorButton"
+							>
 								Switch Creator
 							</Button>
 							<Button size="small" onClick={() => this.setView('plans')}>
@@ -1696,11 +1778,16 @@ class AppBase extends Component {
 			return null;
 		}
 		return (
-			<div className="creatorPickerOverlay">
+			<div
+				className="creatorPickerOverlay"
+				data-spotlight-container="true"
+				data-spotlight-id="creatorPickerOverlay"
+				data-spotlight-restrict="self"
+			>
 				<div className="creatorPicker">
 					<div className="creatorPicker__header">
 						<Heading size="small">Choose a Creator</Heading>
-						<Button size="small" icon="closex" onClick={() => this.setAppState({showCreatorPicker: false})}>
+						<Button size="small" icon="closex" onClick={() => this.closeCreatorPicker()}>
 							Close
 						</Button>
 					</div>
@@ -1712,6 +1799,8 @@ class AppBase extends Component {
 								selected={index === selectedCreatorIndex}
 								onClick={this.handleCreatorActivate}
 								className="creatorPicker__item"
+								data-spotlight-id={`creatorPickerItem-${index}`}
+								data-spotlight-default={index === 0 ? true : undefined}
 							>
 								<div className="creatorPicker__name">{creator.name}</div>
 								{creator.summary ? (
@@ -1789,78 +1878,78 @@ class AppBase extends Component {
 		return (
 			<Panel>
 				<Header title={(selectedVideo && selectedVideo.title) || 'Now Playing'} subtitle={subtitle} />
-				<div className="appPanelBody playerPanelBody">
-					<div className="playerContainer">
-						{videoSource ? (
-							<video
-								ref={this.videoRef}
-								key={`${selectedVideo && selectedVideo.id ? selectedVideo.id : 'video'}-${selectedQuality || 'auto'}`}
-								className="videoElement"
-								controls
-								autoPlay
-								playsInline
-								preload="auto"
-								crossOrigin="use-credentials"
-							>
-								<source src={videoSource.url} type={videoSource.type || 'application/x-mpegURL'} />
-							</video>
-						) : (
-							<div className="playerPlaceholder">
-								{videoLoading ? (
-									<Spinner show size="medium" centered />
-								) : (
-									<BodyText>Select a video to begin playback.</BodyText>
-								)}
-							</div>
-						)}
-					</div>
-					<div
-						className="playerControls"
-						data-spotlight-container="true"
-						data-spotlight-id="playerControls"
-					>
-						<Button
-							onClick={this.handleStopPlayback}
-							size="large"
-							data-spotlight-id="player-back-button"
-							componentRef={(node) => {
-								this.playerBackButtonNode = node;
-							}}
-						>
-							Back to Home
-						</Button>
-						{availableSources.length > 1 ? (
-							<div className="qualitySelector">
-								<Heading size="tiny">Quality</Heading>
-								<div className="qualityButtons">
-									{availableSources.map((source) => {
-										const label = source.quality || 'Auto';
-										const isSelected =
-											(source.quality || '').toLowerCase() ===
-											(selectedQuality || '').toLowerCase();
-										return (
-											<Button
-												key={`${label}-${source.url}`}
-												selected={isSelected}
-												data-quality={source.quality || ''}
-												data-spotlight-id={`quality-${(label || 'auto')
-													.toLowerCase()
-													.replace(/[^a-z0-9]+/g, '-')}`}
-												onClick={this.handleQualityActivate}
-												size="small"
-											>
-												{label}
-											</Button>
-										);
-									})}
+					<div className="appPanelBody playerPanelBody">
+						<div className="playerContainer">
+							{videoSource ? (
+								<video
+									ref={this.videoRef}
+									key={`${selectedVideo && selectedVideo.id ? selectedVideo.id : 'video'}-${selectedQuality || 'auto'}`}
+									className="videoElement"
+									controls
+									autoPlay
+									playsInline
+									preload="auto"
+									crossOrigin="use-credentials"
+								>
+									<source src={videoSource.url} type={videoSource.type || 'application/x-mpegURL'} />
+								</video>
+							) : (
+								<div className="playerPlaceholder">
+									{videoLoading ? (
+										<Spinner show size="medium" centered />
+									) : (
+										<BodyText>Select a video to begin playback.</BodyText>
+									)}
 								</div>
+							)}
+							<div
+								className="playerControls"
+								data-spotlight-container="true"
+								data-spotlight-id="playerControls"
+							>
+								<Button
+									onClick={this.handleStopPlayback}
+									size="large"
+									data-spotlight-id="player-back-button"
+									componentRef={(node) => {
+										this.playerBackButtonNode = node;
+									}}
+								>
+									Back to Home
+								</Button>
+								{availableSources.length > 1 ? (
+									<div className="qualitySelector">
+										<Heading size="tiny">Quality</Heading>
+										<div className="qualityButtons">
+											{availableSources.map((source) => {
+												const label = source.quality || 'Auto';
+												const isSelected =
+													(source.quality || '').toLowerCase() ===
+													(selectedQuality || '').toLowerCase();
+												return (
+													<Button
+														key={`${label}-${source.url}`}
+														selected={isSelected}
+														data-quality={source.quality || ''}
+														data-spotlight-id={`quality-${(label || 'auto')
+															.toLowerCase()
+															.replace(/[^a-z0-9]+/g, '-')}`}
+														onClick={this.handleQualityActivate}
+														size="small"
+													>
+														{label}
+													</Button>
+												);
+											})}
+										</div>
+									</div>
+								) : null}
 							</div>
-						) : null}
+						</div>
 					</div>
-				</div>
-			</Panel>
-		);
-	}
+				</Panel>
+			);
+		}
 
 	render() {
 		const {user, showPlayer} = this.state;
