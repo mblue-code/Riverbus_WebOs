@@ -1,9 +1,0 @@
-<RCC>
-    <qresource prefix="/">
-        <file>../qml/Main.qml</file>
-        <file>../qml/views/LoginView.qml</file>
-        <file>../qml/views/HomeView.qml</file>
-        <file>../qml/views/PlayerView.qml</file>
-        <file>../qml/components/VideoCard.qml</file>
-    </qresource>
-</RCC>
