@@ -897,7 +897,8 @@ service.register('watchKey', async (message) => {
 			accept: 'application/octet-stream',
 			headers: {
 				Referer: 'https://www.floatplane.com/',
-				Origin: 'https://www.floatplane.com'
+				Origin: 'https://www.floatplane.com',
+				'FP-Frontend-Client': 'web'
 			}
 		});
 		if (response.statusCode >= 400) {

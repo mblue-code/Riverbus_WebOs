@@ -1630,7 +1630,10 @@ class AppBase extends Component {
 							// Check if this is a decryption key request
 							// HLS.js key requests go to /api/video/watchKey
 							const url = context && context.url ? context.url : '';
-							const isKeyRequest = url.includes('/api/video/watchKey') || url.includes('watchKey');
+							const lowerUrl = url.toLowerCase();
+							const isKeyRequest =
+								(lowerUrl && lowerUrl.includes('/api/video/watchkey')) ||
+								(context && context.type === 'key');
 
 							console.log('[Floatplane] FloatplaneKeyLoader load', {
 								url,
@@ -1660,7 +1663,7 @@ class AppBase extends Component {
 										total: arrayBuffer.byteLength
 									};
 									console.log('[Floatplane] FloatplaneKeyLoader key success', {size: arrayBuffer.byteLength});
-									callbacks.onSuccess({url: context.url, data: arrayBuffer}, context, stats);
+									callbacks.onSuccess({url: context.url, data: arrayBuffer}, stats, context);
 								})
 								.catch((error) => {
 									if (this.aborted) {
