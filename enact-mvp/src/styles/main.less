@@ -452,6 +452,15 @@ body {
 	display: flex;
 	justify-content: space-between;
 	gap: 16px;
+	align-items: center;
+}
+
+.statusBar__message {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-height: 1.2em;
 }
 
 .statusBar__info {
@@ -460,6 +469,14 @@ body {
 
 .statusBar__error {
 	color: #ff6f6f;
+}
+
+.statusBar__placeholder {
+	min-height: 1em;
+}
+
+.statusBar__refresh {
+	align-self: center;
 }
 
 .playerContainer {

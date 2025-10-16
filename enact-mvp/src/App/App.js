@@ -15,6 +15,7 @@ import Spotlight from '@enact/spotlight';
 import {VirtualGridList} from '@enact/moonstone/VirtualList';
 import LS2Request from '@enact/webos/LS2Request';
 import LoginForm from '../components/LoginForm';
+import Hls from 'hls.js';
 
 const SERVICE_ID = 'luna://com.community.floatplane.enactmvp.login';
 const VIDEO_PAGE_SIZE = 20;
@@ -41,6 +42,9 @@ const createInitialState = () => ({
 	hasMoreVideos: true,
 	channels: [],
 	selectedChannelId: null,
+	playbackSourceIndex: -1,
+	playbackToken: null,
+	playbackTriedIndices: [],
 	view: 'home',
 	searchTerm: '',
 	searchAppliedTerm: '',
@@ -248,16 +252,65 @@ const guessMimeType = (url) => {
 
 const normalizeSources = (sources = [], video = null) => {
 	const collected = [];
-	const push = (source) => {
-		if (!source || !source.url) {
-			return;
+	const seen = new Set();
+	const deriveHeight = (entry) => {
+		if (!entry) {
+			return null;
 		}
-		collected.push({
-			url: source.url,
-			quality: source.quality || source.label || source.name || null,
-			type: source.type || source.mimeType || guessMimeType(source.url)
-		});
+		const source = entry.raw || entry;
+		const numeric = Number(source.height || source.resolutionHeight || source.maxHeight);
+		if (!Number.isNaN(numeric) && numeric > 0) {
+			return numeric;
+		}
+		const resolution = source.resolution || source.size || source.dimensions;
+		if (resolution) {
+			const matchRes = String(resolution).match(/(\d{3,4})[pPxX]/);
+			if (matchRes) {
+				const value = parseInt(matchRes[1], 10);
+				return Number.isNaN(value) ? null : value;
+			}
+			const matchWxH = String(resolution).match(/\d+\D+(\d{3,4})/);
+			if (matchWxH) {
+				const value = parseInt(matchWxH[1], 10);
+				return Number.isNaN(value) ? null : value;
+			}
+		}
+		const quality = source.quality || source.label || source.name;
+		if (quality) {
+			const matchQuality = String(quality).match(/(\d{3,4})p/i);
+			if (matchQuality) {
+				const value = parseInt(matchQuality[1], 10);
+				return Number.isNaN(value) ? null : value;
+			}
+		}
+		const url = source.url;
+		if (url) {
+			const matchUrl = String(url).match(/(\d{3,4})p/i);
+			if (matchUrl) {
+				const value = parseInt(matchUrl[1], 10);
+				return Number.isNaN(value) ? null : value;
+			}
+		}
+		return null;
 	};
+		const push = (source) => {
+			if (!source || !source.url) {
+				return;
+			}
+			const raw = source.raw || source;
+			const urlKey = source.url;
+			if (seen.has(urlKey)) {
+				return;
+			}
+			seen.add(urlKey);
+			collected.push({
+				url: source.url,
+				quality: source.quality || source.label || source.name || null,
+				type: source.type || source.mimeType || guessMimeType(source.url),
+				height: deriveHeight(source),
+				raw
+			});
+		};
 
 	sources.forEach(push);
 
@@ -293,21 +346,54 @@ const pickPreferredSource = (sources = []) => {
 	if (!sources.length) {
 		return null;
 	}
+	const mp4Sources = sources.filter((item) => {
+		const type = (item.type || '').toLowerCase();
+		const url = String(item.url || '').toLowerCase();
+		return type.includes('mp4') || url.includes('.mp4');
+	});
+	const candidates = mp4Sources.length ? mp4Sources : sources;
+	const extractHeight = (entry) => {
+		if (!entry) {
+			return 0;
+		}
+		if (entry.height && !Number.isNaN(Number(entry.height))) {
+			return Number(entry.height);
+		}
+		const quality = entry.quality;
+		if (quality) {
+			const match = String(quality).match(/(\d{3,4})p/i);
+			if (match) {
+				const value = parseInt(match[1], 10);
+				if (!Number.isNaN(value)) {
+					return value;
+				}
+			}
+		}
+		const url = entry.url;
+		if (url) {
+			const match = String(url).match(/(\d{3,4})p/i);
+			if (match) {
+				const value = parseInt(match[1], 10);
+				if (!Number.isNaN(value)) {
+					return value;
+				}
+			}
+		}
+		return 0;
+	};
+	const sorted = [...sources].sort((a, b) => extractHeight(b) - extractHeight(a));
+	const sortedCandidates = [...candidates].sort((a, b) => {
+		return extractHeight(b) - extractHeight(a);
+	});
+	const preferred = sortedCandidates[0] || sorted[0];
+	if (preferred) {
+		return preferred;
+	}
 	const autoSource = sources.find((item) => item.quality && item.quality.toLowerCase().includes('auto'));
 	if (autoSource) {
 		return autoSource;
 	}
-	const sorted = [...sources].sort((a, b) => {
-		const extractHeight = (quality) => {
-			if (!quality) {
-				return 0;
-			}
-			const match = String(quality).match(/(\d{3,4})p/i);
-			return match ? parseInt(match[1], 10) : 0;
-		};
-		return extractHeight(b.quality) - extractHeight(a.quality);
-	});
-	return sorted[0] || sources[0];
+	return sources[0];
 };
 
 const formatDateTime = (value) => {
@@ -350,18 +436,58 @@ class AppBase extends Component {
 	playerFocusTimeout = null;
 	globalKeyHandler = null;
 	playerBackButtonNode = null;
+	currentVideoLoad = null;
+	playbackRafId = null;
+	playbackInitiatedToken = null;
+	playbackStartTimestamp = 0;
+	watchKeyCache = new Map();
+	hlsInstance = null;
 	constructor(props) {
 		super(props);
 		this.renderVideoItem = this.renderVideoItem.bind(this);
 	}
 
-	safeSetContainerDefault = (containerId, elementId) => {
-		try {
-			Spotlight.setContainerDefault(containerId, elementId);
-		} catch (error) {
-			// eslint-disable-next-line no-console
-			console.warn('[Floatplane] Spotlight.setContainerDefault failed', containerId, elementId, error);
+	hasSpotlightMethod = (method) =>
+		typeof Spotlight !== 'undefined' && Spotlight && typeof Spotlight[method] === 'function';
+
+	safeSpotlightCall = (method, ...args) => {
+		if (!this.hasSpotlightMethod(method)) {
+			return undefined;
 		}
+		try {
+			return Spotlight[method](...args);
+		} catch (error) {
+			console.warn(`[Floatplane] Spotlight.${method} failed`, error);
+			return undefined;
+		}
+	};
+
+	clearPlaybackSchedule = () => {
+		if (!this.playbackRafId) {
+			return;
+		}
+		if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+			window.cancelAnimationFrame(this.playbackRafId);
+		} else {
+			clearTimeout(this.playbackRafId);
+		}
+		this.playbackRafId = null;
+	};
+
+	schedulePlaybackAttempt = (fn, delay = 16) => {
+		const wrapped = () => {
+			this.playbackRafId = null;
+			fn();
+		};
+		if (delay === 0 && typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+			this.playbackRafId = window.requestAnimationFrame(() => wrapped());
+		} else {
+			this.playbackRafId = setTimeout(wrapped, delay);
+		}
+	};
+
+	safeSetContainerDefault = (containerId, elementId) => {
+		this.safeSpotlightCall('setContainerDefault', containerId, elementId);
 	};
 
 	componentDidMount() {
@@ -381,9 +507,14 @@ class AppBase extends Component {
 			this.state.selectedQuality !== prevState.selectedQuality;
 		const toggledPlayer = this.state.showPlayer && !prevState.showPlayer;
 		if ((sourceChanged || toggledPlayer) && this.state.showPlayer) {
-			this.attachVideoListeners();
-			this.triggerVideoPlayback();
-			this.focusPlayerControls();
+			console.log('[Floatplane] componentDidUpdate playback check', {
+				sourceChanged,
+				toggledPlayer,
+				nextSource: this.state.videoSource ? this.state.videoSource.url : null,
+				prevSource: prevState.videoSource ? prevState.videoSource.url : null,
+				selectedQuality: this.state.selectedQuality
+			});
+			this.startPlaybackSequence();
 		}
 		const channelsChanged = prevState.channels !== this.state.channels || prevState.channels.length !== this.state.channels.length;
 		if (channelsChanged) {
@@ -423,6 +554,9 @@ class AppBase extends Component {
 			clearTimeout(this.playerFocusTimeout);
 			this.playerFocusTimeout = null;
 		}
+		this.clearPlaybackSchedule();
+		this.destroyHls();
+		this.watchKeyCache.clear();
 		if (this.globalKeyHandler && typeof document !== 'undefined') {
 			document.removeEventListener('keydown', this.globalKeyHandler, true);
 			this.globalKeyHandler = null;
@@ -468,6 +602,117 @@ class AppBase extends Component {
 	setAppState(nextState, callback) {
 		this.setState((prev) => Object.assign({}, prev, nextState), callback);
 	}
+
+	destroyHls = () => {
+		if (this.hlsInstance) {
+			try {
+				this.hlsInstance.destroy();
+				console.log('[Floatplane] HLS instance destroyed');
+			} catch (error) {
+				console.warn('[Floatplane] HLS destroy error', error);
+			}
+			this.hlsInstance = null;
+		}
+	};
+
+	resetVideoElement = () => {
+		this.destroyHls();
+		this.watchKeyCache.clear();
+		const element = this.videoRef.current;
+		if (!element) {
+			return;
+		}
+		try {
+			element.pause();
+		} catch (error) {
+			// ignore pause errors
+		}
+		try {
+			element.src = '';
+		} catch (error) {
+			// ignore src reset errors
+		}
+		try {
+			element.removeAttribute('src');
+		} catch (error) {
+			// ignore missing attribute
+		}
+		try {
+			while (element.firstChild) {
+				element.removeChild(element.firstChild);
+			}
+		} catch (error) {
+			// ignore DOM cleanup errors
+		}
+		try {
+			element.load();
+		} catch (error) {
+			// ignore load errors
+		}
+	};
+
+	base64ToArrayBuffer = (base64) => {
+		if (!base64) {
+			return new ArrayBuffer(0);
+		}
+		let binaryString = '';
+		try {
+			if (typeof atob === 'function') {
+				binaryString = atob(base64);
+			} else if (typeof Buffer !== 'undefined') {
+				// eslint-disable-next-line no-undef
+				binaryString = Buffer.from(base64, 'base64').toString('binary');
+			} else {
+				throw new Error('No base64 decoder available');
+			}
+		} catch (error) {
+			console.warn('[Floatplane] Failed to decode base64 key', error);
+		}
+		if (!binaryString) {
+			throw new Error('Decoded watch key is empty');
+		}
+		const length = binaryString.length;
+		const bytes = new Uint8Array(length);
+		for (let i = 0; i < length; i += 1) {
+			bytes[i] = binaryString.charCodeAt(i);
+		}
+		return bytes.buffer;
+	};
+
+	fetchWatchKey = async (watchKeyUrl) => {
+		if (!watchKeyUrl) {
+			throw new Error('Watch key URL not provided');
+		}
+		let token = null;
+		try {
+			const parsed = new URL(watchKeyUrl, typeof window !== 'undefined' ? window.location.origin : undefined);
+			token = parsed.searchParams.get('token');
+		} catch (error) {
+			const match = String(watchKeyUrl).match(/token=([^&]+)/);
+			token = match ? decodeURIComponent(match[1]) : null;
+		}
+		if (!token) {
+			throw new Error('Watch key token missing');
+		}
+		if (this.watchKeyCache.has(token)) {
+			const cached = this.watchKeyCache.get(token);
+			return cached && typeof cached.slice === 'function' ? cached.slice(0) : cached;
+		}
+		let response;
+		try {
+			response = await ls2Call('watchKey', {token});
+		} catch (error) {
+			console.warn('[Floatplane] watchKey request failed', {token, error: error && error.message ? error.message : error});
+			throw error;
+		}
+		const keyBase64 = response && response.key ? response.key : response && response.body && response.body.key;
+		if (!keyBase64) {
+			throw new Error('Watch key not available');
+		}
+		const buffer = this.base64ToArrayBuffer(keyBase64);
+		this.watchKeyCache.set(token, buffer);
+		return buffer && typeof buffer.slice === 'function' ? buffer.slice(0) : buffer;
+	};
 
 	async bootstrapSession() {
 		try {
@@ -711,22 +956,25 @@ class AppBase extends Component {
 			overrideSearch !== undefined ? overrideSearch : this.state.searchAppliedTerm || this.state.searchTerm;
 
 		if (!append) {
-			this.setState((prev) =>
-				Object.assign({}, prev, {
-					selectedCreatorIndex: index,
-					selectedCreator: creator,
-					loadingVideos: true,
+				this.setState((prev) =>
+					Object.assign({}, prev, {
+						selectedCreatorIndex: index,
+						selectedCreator: creator,
+						loadingVideos: true,
 					errorMessage: null,
 					infoMessage: `Loading videos for ${creator.name}…`,
 					selectedVideoIndex: -1,
 					selectedVideo: null,
 					videos: [],
 					videoSource: null,
-					availableSources: [],
-					selectedQuality: null,
-					playerError: null,
-					videoNextCursor: 0,
-					hasMoreVideos: true,
+						availableSources: [],
+						selectedQuality: null,
+						playbackToken: null,
+						playbackSourceIndex: -1,
+						playbackTriedIndices: [],
+						playerError: null,
+						videoNextCursor: 0,
+						hasMoreVideos: true,
 					channels: [],
 					selectedChannelId: null
 				})
@@ -928,12 +1176,31 @@ class AppBase extends Component {
 		}
 
 		try {
-			await this.ensureVideoSource(selectedVideo);
-			this.setAppState({
-				showPlayer: true,
-				infoMessage: null,
-				playerError: null
-			});
+			this.setAppState({playbackToken: null});
+			const loadResult = await this.ensureVideoSource(selectedVideo);
+			if (!loadResult || loadResult.cancelled) {
+				// Loading was superseded by a newer request; bail quietly.
+				return;
+			}
+			const resolvedSource = loadResult.source || loadResult;
+			this.resetVideoElement();
+			this.setAppState(
+				{
+					showPlayer: true,
+					infoMessage: null,
+					playerError: null,
+					videoSource: resolvedSource,
+					playbackSourceIndex: this.getSourceIndex(resolvedSource)
+				},
+				() => {
+					console.log('[Floatplane] handlePlaySelected showPlayer', {
+						videoId: selectedVideo.id,
+						sourceUrl: this.state.videoSource && this.state.videoSource.url,
+						showPlayer: this.state.showPlayer
+					});
+					this.startPlaybackSequence();
+				}
+			);
 		} catch (error) {
 			this.setAppState({
 				playerError: error.message || 'Unable to start playback.'
@@ -974,13 +1241,30 @@ class AppBase extends Component {
 				infoMessage: 'Opening live stream…'
 			});
 		}
-		this.ensureVideoSource(pseudoVideo)
-			.then(() => {
-				this.setAppState({
-					showPlayer: true,
-					playerError: null,
-					infoMessage: 'Live stream ready.'
-				});
+		this.setAppState({playbackToken: null});
+	this.ensureVideoSource(pseudoVideo)
+		.then((loadResult) => {
+			if (!loadResult || loadResult.cancelled) {
+				return;
+			}
+			const resolvedSource = loadResult.source || loadResult;
+			this.resetVideoElement();
+				this.setAppState(
+					{
+						showPlayer: true,
+						playerError: null,
+						infoMessage: 'Live stream ready.',
+						videoSource: resolvedSource
+					},
+					() => {
+						console.log('[Floatplane] handlePlayLiveStream showPlayer', {
+							videoId: pseudoVideo.id,
+							sourceUrl: this.state.videoSource && this.state.videoSource.url,
+							showPlayer: this.state.showPlayer
+						});
+						this.startPlaybackSequence();
+					}
+				);
 			})
 			.catch((error) => {
 				this.setAppState({playerError: error.message || 'Unable to start live stream.'});
@@ -988,9 +1272,16 @@ class AppBase extends Component {
 	};
 
 	handleStopPlayback = () => {
+		this.playbackInitiatedToken = null;
+		this.playbackStartTimestamp = 0;
 		this.setAppState({
-			showPlayer: false
+			showPlayer: false,
+			playbackToken: null,
+			playbackSourceIndex: -1,
+			playbackTriedIndices: []
 		});
+		this.clearPlaybackSchedule();
+		this.resetVideoElement();
 		if (this.videoRef.current) {
 			try {
 				this.videoRef.current.pause();
@@ -998,6 +1289,110 @@ class AppBase extends Component {
 				// ignore video pause errors
 			}
 		}
+	};
+
+	getSourceIndex = (source) => {
+		const {availableSources} = this.state;
+		if (!source || !availableSources || !availableSources.length) {
+			return -1;
+		}
+		return availableSources.findIndex(
+			(item) => item && item.url === source.url && (item.type || '') === (source.type || '')
+		);
+	};
+
+	handlePlaybackFailure = (token) => {
+		if (this.state.playbackToken === token) {
+			this.playbackInitiatedToken = null;
+			this.playbackStartTimestamp = 0;
+		}
+		if (this.state.playbackToken !== token || !this.state.showPlayer) {
+			return;
+		}
+		const {availableSources, playbackSourceIndex, playbackTriedIndices} = this.state;
+		if (!availableSources || !availableSources.length) {
+			this.setAppState({
+				playerError: 'Playback timed out. Please try refreshing.',
+				infoMessage: null
+			});
+			this.clearPlaybackSchedule();
+			return;
+		}
+		const triedSet = new Set(Array.isArray(playbackTriedIndices) ? playbackTriedIndices : []);
+		if (playbackSourceIndex >= 0) {
+			triedSet.add(playbackSourceIndex);
+		}
+		const candidates = availableSources
+			.map((source, index) => ({source, index}))
+			.filter((item) => !triedSet.has(item.index));
+		if (!candidates.length) {
+			this.setAppState({
+				playerError: 'Playback timed out. Please try another video.',
+				infoMessage: null,
+				playbackToken: null,
+				playbackSourceIndex: -1,
+				playbackTriedIndices: Array.from(triedSet)
+			});
+			this.clearPlaybackSchedule();
+			return;
+		}
+		const mp4Candidates = candidates.filter((item) =>
+			(item.source.type || '').toLowerCase().includes('mp4')
+		);
+		const scoreHeight = (source) => {
+			const match = String(source.quality || '').match(/(\d{3,4})p/i);
+			return match ? parseInt(match[1], 10) : 0;
+		};
+		const sorted = (mp4Candidates.length ? mp4Candidates : candidates).sort(
+			(a, b) => scoreHeight(b.source) - scoreHeight(a.source)
+		);
+		const next = sorted[0];
+		const label = next.source.quality || next.source.type || 'alternate';
+		const nextTried = Array.from(new Set([...triedSet, next.index]));
+		this.resetVideoElement();
+		this.setAppState(
+			{
+				videoSource: next.source,
+				selectedQuality: next.source.quality || null,
+				playbackToken: Date.now(),
+				playbackSourceIndex: next.index,
+				playbackTriedIndices: nextTried,
+				playerError: null,
+				infoMessage: `Trying alternate source (${label})`
+			},
+			() => this.startPlaybackSequence()
+		);
+	};
+
+	handleHardRefresh = () => {
+		const {selectedCreator, selectedCreatorIndex} = this.state;
+		this.handleStopPlayback();
+		this.detachVideoListeners();
+		this.currentVideoLoad = null;
+		this.clearPlaybackSchedule();
+		this.setAppState(
+			{
+				infoMessage: 'Refreshing content…',
+				errorMessage: null,
+				videos: [],
+				availableSources: [],
+				videoSource: null,
+				selectedVideo: null,
+				selectedVideoIndex: -1,
+				videoLoading: false,
+				loadingVideos: false,
+				playbackToken: null,
+				playbackSourceIndex: -1,
+				playbackTriedIndices: []
+			},
+			() => {
+				if (selectedCreator && selectedCreator.id) {
+					this.fetchCreatorContent(selectedCreator, selectedCreatorIndex, {append: false});
+				} else {
+					this.fetchSubscriptions();
+				}
+			}
+		);
 	};
 
 	setQuality = (quality) => {
@@ -1012,10 +1407,18 @@ class AppBase extends Component {
 			return (source.quality || '').toLowerCase() === (quality || '').toLowerCase();
 		});
 		if (nextSource) {
-			this.setAppState({
-				videoSource: nextSource,
-				selectedQuality: nextSource.quality || null
-			});
+			const index = this.getSourceIndex(nextSource);
+			this.resetVideoElement();
+			this.setAppState(
+				{
+					videoSource: nextSource,
+					selectedQuality: nextSource.quality || null,
+					playbackToken: Date.now(),
+					playbackSourceIndex: index,
+					playbackTriedIndices: index >= 0 ? [index] : []
+				},
+				() => this.startPlaybackSequence()
+			);
 		}
 	};
 
@@ -1028,50 +1431,350 @@ class AppBase extends Component {
 	};
 
 	async ensureVideoSource(video) {
-		const {videoSource, selectedVideo} = this.state;
-		if (videoSource && selectedVideo && selectedVideo.id === video.id) {
-			return videoSource;
+		if (!video || !video.id) {
+			throw new Error('Video identifier not available.');
 		}
+
+		if (this.currentVideoLoad && this.currentVideoLoad.videoId === video.id && this.currentVideoLoad.promise) {
+			// eslint-disable-next-line no-console
+			console.log('[Floatplane] ensureVideoSource reuse', video.id);
+			return this.currentVideoLoad.promise;
+		}
+
+		const loadContext = {
+			videoId: video.id,
+			promise: null,
+			startedAt: Date.now()
+		};
+		// eslint-disable-next-line no-console
+		console.log('[Floatplane] ensureVideoSource start', {
+			videoId: video.id,
+			attachmentId: video.attachmentId,
+			token: loadContext.startedAt
+		});
+		this.currentVideoLoad = loadContext;
+
+		const isActive = () => this.currentVideoLoad === loadContext;
+
 		this.setAppState({videoLoading: true, playerError: null});
-		try {
-			const attachmentId =
-				video.attachmentId ||
-				(Array.isArray(video.videoAttachments) ? extractAttachmentId(video.videoAttachments) : null);
-			if (!attachmentId) {
-				throw new Error('Video attachment identifier not available.');
-			}
-			const isLiveVideo = Boolean(video && video.isLive);
-			const deliveryPayload = {
-				attachmentId,
-				videoId: video.id,
-				isLive: isLiveVideo
-			};
-			if (isLiveVideo) {
-				deliveryPayload.scenario = 'live';
-			}
-			const response = await ls2Call('videoDelivery', deliveryPayload);
-			const sources =
-				response && response.body && Array.isArray(response.body.sources) ? response.body.sources : [];
+
+		const loadPromise = (async () => {
+			try {
+				const attachmentId =
+					video.attachmentId ||
+					(Array.isArray(video.videoAttachments) ? extractAttachmentId(video.videoAttachments) : null);
+				if (!attachmentId) {
+					throw new Error('Video attachment identifier not available.');
+				}
+				const isLiveVideo = Boolean(video && video.isLive);
+				const deliveryPayload = {
+					attachmentId,
+					videoId: video.id,
+					isLive: isLiveVideo
+				};
+				if (isLiveVideo) {
+					deliveryPayload.scenario = 'live';
+				}
+				const response = await ls2Call('videoDelivery', deliveryPayload);
+				const sources =
+					response && response.body && Array.isArray(response.body.sources) ? response.body.sources : [];
 			const normalizedSources = normalizeSources(sources, video);
 			if (!normalizedSources.length) {
 				throw new Error('No playable sources returned for this video.');
 			}
 			const preferred = pickPreferredSource(normalizedSources);
-			this.setAppState({
-				availableSources: normalizedSources,
-				videoSource: preferred,
-				selectedQuality: preferred && preferred.quality ? preferred.quality : null,
-				videoLoading: false
-			});
-			return preferred;
-		} catch (error) {
-			this.setAppState({
-				videoLoading: false,
-				playerError: error.message || 'Video delivery failed.'
-			});
-			throw error;
-		}
+			const preferredIndex = normalizedSources.findIndex(
+				(item) => item && item.url === (preferred && preferred.url) && (item.type || '') === (preferred && preferred.type || '')
+			);
+
+			if (isActive()) {
+				// eslint-disable-next-line no-console
+				console.log('[Floatplane] ensureVideoSource success', {
+					videoId: video.id,
+					token: loadContext.startedAt,
+					sourceUrl: preferred && preferred.url,
+					sourceType: preferred && preferred.type
+				});
+				this.setAppState(
+					{
+						availableSources: normalizedSources,
+						videoSource: preferred,
+						selectedQuality: preferred && preferred.quality ? preferred.quality : null,
+						videoLoading: false,
+						playbackToken: loadContext.startedAt,
+						playbackSourceIndex: preferredIndex >= 0 ? preferredIndex : 0,
+						playbackTriedIndices: preferredIndex >= 0 ? [preferredIndex] : []
+					},
+					() => {
+						console.log('[Floatplane] ensureVideoSource state-updated', {
+							videoId: video.id,
+							token: loadContext.startedAt,
+							sourceUrl: this.state.videoSource && this.state.videoSource.url,
+							showPlayer: this.state.showPlayer
+						});
+						if (Array.isArray(this.state.availableSources)) {
+							const sanitized = this.state.availableSources.map((item) => {
+								let urlHost = null;
+								let urlPath = null;
+								try {
+									if (item.url) {
+										const parsed = new URL(item.url);
+										urlHost = parsed.host;
+										urlPath = parsed.pathname;
+									}
+								} catch (error) {
+									urlHost = null;
+									urlPath = null;
+								}
+								return {
+									type: item.type,
+									quality: item.quality,
+									height: item.height,
+									urlHost,
+									urlPath,
+									rawKeys: item.raw ? Object.keys(item.raw) : null
+								};
+							});
+							console.log('[Floatplane] ensureVideoSource available sources', sanitized);
+						}
+					}
+				);
+				return {source: preferred, context: loadContext};
+			}
+			return {cancelled: true, context: loadContext};
+			} catch (error) {
+				if (isActive()) {
+					// eslint-disable-next-line no-console
+					console.log('[Floatplane] ensureVideoSource error', {
+						videoId: video.id,
+						token: loadContext.startedAt,
+						error: error && error.message
+					});
+					this.setAppState({
+						videoLoading: false,
+						playerError: error.message || 'Video delivery failed.'
+					});
+					throw error;
+				}
+				return {cancelled: true, context: loadContext};
+			} finally {
+				if (isActive()) {
+					// eslint-disable-next-line no-console
+					console.log('[Floatplane] ensureVideoSource finalize', {
+						videoId: video.id,
+						token: loadContext.startedAt
+					});
+					this.currentVideoLoad = null;
+				}
+			}
+		})();
+
+		loadContext.promise = loadPromise;
+		return loadPromise;
 	}
+
+	startPlaybackSequence = () => {
+		if (!this.state.showPlayer) {
+			return;
+		}
+		const expectedToken = this.state.playbackToken;
+		this.clearPlaybackSchedule();
+		if (this.playbackInitiatedToken !== expectedToken) {
+			this.playbackInitiatedToken = null;
+		}
+		const startTime = Date.now();
+		const maxWaitMs = 20000;
+		const attemptPlayback = () => {
+			if (!this.state.showPlayer || this.state.playbackToken !== expectedToken) {
+				return;
+			}
+			const element = this.videoRef.current;
+			if (!element) {
+				if (Date.now() - startTime > maxWaitMs) {
+					console.warn('[Floatplane] startPlaybackSequence gave up waiting for video element');
+					this.handlePlaybackFailure(expectedToken);
+					return;
+				}
+				this.schedulePlaybackAttempt(() => attemptPlayback(), 120);
+				return;
+			}
+			console.log('[Floatplane] startPlaybackSequence run', {
+				currentSrc: element.currentSrc,
+				readyState: element.readyState,
+				networkState: element.networkState,
+				token: expectedToken
+			});
+			const targetSrc = this.state.videoSource && this.state.videoSource.url ? this.state.videoSource.url : '';
+			const sourceType = this.state.videoSource && this.state.videoSource.type ? this.state.videoSource.type : '';
+			const isHls = sourceType === 'application/x-mpegURL' || targetSrc.includes('.m3u8');
+
+			if (targetSrc) {
+				// Check if we need HLS.js for this source
+				if (isHls && Hls.isSupported()) {
+					console.log('[Floatplane] Using HLS.js for stream', {url: targetSrc, type: sourceType});
+					this.destroyHls();
+					const component = this;
+
+					// Extend the default HLS loader to properly handle key requests
+					const {loader: BaseLoader} = Hls.DefaultConfig;
+					class FloatplaneKeyLoader extends BaseLoader {
+						constructor(config) {
+							super(config);
+							this.aborted = false;
+						}
+
+						load(context, config, callbacks) {
+							const requestStart = Date.now();
+							this.aborted = false;
+
+							// Check if this is a decryption key request
+							// HLS.js key requests go to /api/video/watchKey
+							const url = context && context.url ? context.url : '';
+							const isKeyRequest = url.includes('/api/video/watchKey') || url.includes('watchKey');
+
+							console.log('[Floatplane] FloatplaneKeyLoader load', {
+								url,
+								type: context && context.type,
+								isKeyRequest
+							});
+
+							// Only use custom loader for decryption key requests
+							if (!isKeyRequest) {
+								// Use default loader for manifest and segment requests
+								console.log('[Floatplane] Using default loader for', context.type || 'segment');
+								return super.load(context, config, callbacks);
+							}
+
+							// Custom key loading via Luna service
+							component
+								.fetchWatchKey(context && context.url ? context.url : '')
+								.then((arrayBuffer) => {
+									if (this.aborted) {
+										return;
+									}
+									const stats = {
+										trequest: requestStart,
+										tfirst: Date.now(),
+										tload: Date.now(),
+										loaded: arrayBuffer.byteLength,
+										total: arrayBuffer.byteLength
+									};
+									console.log('[Floatplane] FloatplaneKeyLoader key success', {size: arrayBuffer.byteLength});
+									callbacks.onSuccess({url: context.url, data: arrayBuffer}, context, stats);
+								})
+								.catch((error) => {
+									if (this.aborted) {
+										return;
+									}
+									console.error('[Floatplane] FloatplaneKeyLoader key error', error);
+									callbacks.onError(
+										{
+											code: error && error.statusCode ? error.statusCode : 0,
+											text: (error && error.message) || 'Failed to load watch key'
+										},
+										context,
+										error
+									);
+								});
+						}
+
+						abort() {
+							this.aborted = true;
+							super.abort();
+						}
+
+						destroy() {
+							this.aborted = true;
+							super.destroy();
+						}
+					}
+
+					this.hlsInstance = new Hls({
+						debug: false,
+						enableWorker: true,
+						lowLatencyMode: false,
+						xhrSetup: (xhr) => {
+							xhr.withCredentials = true;
+						},
+						loader: FloatplaneKeyLoader
+					});
+
+					this.hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+						console.error('[Floatplane] HLS error', {type: data.type, details: data.details, fatal: data.fatal});
+						if (data.fatal) {
+							switch (data.type) {
+								case Hls.ErrorTypes.NETWORK_ERROR:
+									console.log('[Floatplane] HLS fatal network error, trying to recover');
+									this.hlsInstance.startLoad();
+									break;
+								case Hls.ErrorTypes.MEDIA_ERROR:
+									console.log('[Floatplane] HLS fatal media error, trying to recover');
+									this.hlsInstance.recoverMediaError();
+									break;
+								default:
+									console.log('[Floatplane] HLS fatal error, cannot recover');
+									this.handlePlaybackFailure(expectedToken);
+									break;
+							}
+						}
+					});
+
+					this.hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+						console.log('[Floatplane] HLS manifest parsed successfully');
+					});
+
+					this.hlsInstance.loadSource(targetSrc);
+					this.hlsInstance.attachMedia(element);
+				} else if (isHls && !Hls.isSupported()) {
+					// Fallback to native HLS support (Safari, some Smart TVs)
+					console.log('[Floatplane] HLS.js not supported, using native HLS', {url: targetSrc});
+					const currentAttr = element.getAttribute('src') || '';
+					if (currentAttr !== targetSrc) {
+						try {
+							element.src = targetSrc;
+							element.setAttribute('src', targetSrc);
+							element.load();
+						} catch (error) {
+							console.warn('[Floatplane] startPlaybackSequence setAttribute error', error);
+						}
+					}
+				} else {
+					// Direct MP4 playback
+					console.log('[Floatplane] Using direct playback for MP4', {url: targetSrc, type: sourceType});
+					const currentAttr = element.getAttribute('src') || '';
+					if (currentAttr !== targetSrc) {
+						try {
+							element.src = targetSrc;
+							element.setAttribute('src', targetSrc);
+							element.load();
+						} catch (error) {
+							console.warn('[Floatplane] startPlaybackSequence setAttribute error', error);
+						}
+					}
+				}
+			}
+			if (this.playbackInitiatedToken === expectedToken) {
+				return;
+			}
+			this.playbackInitiatedToken = expectedToken;
+			this.playbackStartTimestamp = Date.now();
+			try {
+				if (element.readyState === 0 && element.networkState === 0) {
+					try {
+						element.load();
+					} catch (error) {
+						console.warn('[Floatplane] startPlaybackSequence element.load error', error);
+					}
+				}
+				this.attachVideoListeners();
+				this.triggerVideoPlayback();
+				this.focusPlayerControls();
+			} catch (error) {
+				console.warn('[Floatplane] startPlaybackSequence error', error);
+			}
+		};
+		this.schedulePlaybackAttempt(() => attemptPlayback(), 0);
+	};
 
 	triggerVideoPlayback() {
 		const element = this.videoRef.current;
@@ -1079,19 +1782,111 @@ class AppBase extends Component {
 			return;
 		}
 		try {
+			const startToken = this.state.playbackToken;
+			console.log('[Floatplane] triggerVideoPlayback start', {
+				currentSrc: element.currentSrc,
+				readyState: element.readyState
+			});
 			element.pause();
-			element.load();
-			const playPromise = element.play();
-			if (playPromise && typeof playPromise.catch === 'function') {
-				playPromise.catch(() => {
-					this.setAppState({
-						playerError: 'Playback blocked until you press OK.',
-						infoMessage: null
-					});
+			let settled = false;
+			let fallbackTimer = null;
+			const events = ['loadeddata', 'loadedmetadata', 'canplay', 'canplaythrough', 'playing', 'timeupdate'];
+			let onReady;
+			const removeListeners = () => {
+				events.forEach((eventName) => {
+					try {
+						element.removeEventListener(eventName, onReady);
+					} catch (error) {
+						// ignore listener removal errors
+					}
 				});
+			};
+			const clearFallback = () => {
+				if (fallbackTimer) {
+					clearTimeout(fallbackTimer);
+					fallbackTimer = null;
+				}
+			};
+			const finalize = (handleFailure = false) => {
+				if (settled) {
+					return false;
+				}
+				settled = true;
+				removeListeners();
+				clearFallback();
+				if (handleFailure) {
+					this.handlePlaybackFailure(startToken);
+				}
+				return true;
+			};
+			const playVideo = () => {
+				try {
+					console.log('[Floatplane] triggerVideoPlayback play', {
+						readyState: element.readyState,
+						currentSrc: element.currentSrc
+					});
+					const playPromise = element.play();
+					if (playPromise && typeof playPromise.catch === 'function') {
+						playPromise.catch(() => {
+							this.setAppState({
+								playerError: 'Playback blocked until you press OK.',
+								infoMessage: null
+							});
+						});
+					}
+				} catch (error) {
+					console.warn('[Floatplane] triggerVideoPlayback play error', error);
+				}
+			};
+			onReady = () => {
+				if (!finalize()) {
+					return;
+				}
+				playVideo();
+			};
+			events.forEach((eventName) => {
+				element.addEventListener(eventName, onReady, {once: true});
+			});
+			const fallbackInitialDelay = 4000;
+			const fallbackRetryDelay = 1500;
+			const fallbackMaxWait = 20000;
+			const fallbackStartedAt = Date.now();
+			const evaluatePlaybackProgress = () => {
+				if (settled) {
+					return;
+				}
+				const {readyState, networkState, currentTime, error} = element;
+				if (readyState >= 2 || currentTime > 0) {
+					onReady();
+					return;
+				}
+				const noSourceCode =
+					(typeof HTMLMediaElement !== 'undefined' && HTMLMediaElement.NETWORK_NO_SOURCE) || 3; // eslint-disable-line no-undef
+				if (error || networkState === noSourceCode || Date.now() - fallbackStartedAt >= fallbackMaxWait) {
+					if (finalize(true)) {
+						console.warn('[Floatplane] triggerVideoPlayback fallback', {
+							readyState: element.readyState,
+							networkState: element.networkState,
+							error: error ? error.code || error.message : null
+						});
+					}
+					return;
+				}
+				fallbackTimer = setTimeout(() => evaluatePlaybackProgress(), fallbackRetryDelay);
+			};
+			fallbackTimer = setTimeout(() => evaluatePlaybackProgress(), fallbackInitialDelay);
+			if (element.readyState >= 2) {
+				onReady();
+			} else {
+				try {
+					element.load();
+				} catch (error) {
+					console.warn('[Floatplane] triggerVideoPlayback load error', error);
+				}
 			}
 		} catch (error) {
 			// ignore playback errors (user interaction required, etc.)
+			console.warn('[Floatplane] triggerVideoPlayback error', error);
 		}
 	}
 
@@ -1120,44 +1915,42 @@ class AppBase extends Component {
 		if (!this.state.videos.length || this.state.showPlayer) {
 			return;
 		}
-		if (Spotlight.getPointerMode()) {
-			Spotlight.setPointerMode(false);
-		}
-		if (Spotlight.isPaused && Spotlight.isPaused()) {
-			Spotlight.resume();
-		}
 		const containerId = 'videoGridContainer';
 		const targetId = 'videoCard-0';
-		Spotlight.setContainerDefault(containerId, targetId);
-		Spotlight.setActiveContainer(containerId);
-		let focused = Spotlight.focus(targetId);
+		const pointerMode = this.safeSpotlightCall('getPointerMode');
+		if (pointerMode) {
+			this.safeSpotlightCall('setPointerMode', false);
+		}
+		const paused = this.safeSpotlightCall('isPaused');
+		if (paused) {
+			this.safeSpotlightCall('resume');
+		}
+		this.safeSetContainerDefault(containerId, targetId);
+		this.safeSpotlightCall('setActiveContainer', containerId);
+		const focused = this.focusSpotlightTarget(targetId, `[data-spotlight-id="${targetId}"]`);
 		if (!focused && typeof document !== 'undefined') {
-			const node = document.querySelector(`[data-spotlight-id="${targetId}"]`);
-			if (node) {
-				Spotlight.focus(node);
+			const node = document.querySelector('[data-spotlight-id]');
+			if (node && typeof node.focus === 'function') {
+				node.focus();
 			}
 		}
 	};
 
 	focusSpotlightTarget = (spotlightId, fallbackSelector) => {
 		let focused = false;
-		try {
-			if (spotlightId && Spotlight.focus) {
-				focused = Spotlight.focus(spotlightId);
-			}
-			if (!focused && typeof document !== 'undefined') {
-				const selector =
-					fallbackSelector || (spotlightId ? `[data-spotlight-id="${spotlightId}"]` : null);
-				if (selector) {
-					const node = document.querySelector(selector);
-					if (node && typeof node.focus === 'function') {
-						node.focus();
-						focused = true;
-					}
+		if (spotlightId) {
+			const result = this.safeSpotlightCall('focus', spotlightId);
+			focused = Boolean(result);
+		}
+		if (!focused && typeof document !== 'undefined') {
+			const selector = fallbackSelector || (spotlightId ? `[data-spotlight-id="${spotlightId}"]` : null);
+			if (selector) {
+				const node = document.querySelector(selector);
+				if (node && typeof node.focus === 'function') {
+					node.focus();
+					focused = true;
 				}
 			}
-		} catch (error) {
-			// ignore focus errors
 		}
 		return focused;
 	};
@@ -1171,44 +1964,35 @@ class AppBase extends Component {
 		}
 		this.playerFocusTimeout = setTimeout(() => {
 			this.playerFocusTimeout = null;
-			try {
-				if (Spotlight.getPointerMode && Spotlight.getPointerMode()) {
-					Spotlight.setPointerMode(false);
-				}
-				if (Spotlight.resume && Spotlight.isPaused && Spotlight.isPaused()) {
-					Spotlight.resume();
-				}
-				if (Spotlight.setContainerDefault) {
-					Spotlight.setContainerDefault('playerControls', 'player-back-button');
-				}
-				if (Spotlight.setActiveContainer) {
-					Spotlight.setActiveContainer('playerControls');
-				}
-				let focused = false;
-				if (Spotlight.focus) {
-					focused = Spotlight.focus('player-back-button');
-				}
-				if (!focused) {
-					const backButton = this.playerBackButtonNode;
-					if (backButton) {
-						const node =
-							typeof backButton.nodeRef === 'object' && backButton.nodeRef
-								? backButton.nodeRef.current || backButton.nodeRef
-								: backButton;
-						if (node && typeof node.focus === 'function') {
-							node.focus();
-							focused = true;
-						}
-					}
-				}
-				if (!focused && typeof document !== 'undefined') {
-					const node = document.querySelector('[data-spotlight-id=\"player-back-button\"]');
+			const pointerMode = this.safeSpotlightCall('getPointerMode');
+			if (pointerMode) {
+				this.safeSpotlightCall('setPointerMode', false);
+			}
+			const paused = this.safeSpotlightCall('isPaused');
+			if (paused) {
+				this.safeSpotlightCall('resume');
+			}
+			this.safeSetContainerDefault('playerControls', 'player-back-button');
+			this.safeSpotlightCall('setActiveContainer', 'playerControls');
+			let focused = this.focusSpotlightTarget('player-back-button', '[data-spotlight-id="player-back-button"]');
+			if (!focused) {
+				const backButton = this.playerBackButtonNode;
+				if (backButton) {
+					const node =
+						typeof backButton.nodeRef === 'object' && backButton.nodeRef
+							? backButton.nodeRef.current || backButton.nodeRef
+							: backButton;
 					if (node && typeof node.focus === 'function') {
 						node.focus();
+						focused = true;
 					}
 				}
-			} catch (error) {
-				// ignore focus errors
+			}
+			if (!focused && typeof document !== 'undefined') {
+				const node = document.querySelector('[data-spotlight-id="player-back-button"]');
+				if (node && typeof node.focus === 'function') {
+					node.focus();
+				}
 			}
 		}, 0);
 	};
@@ -1729,14 +2513,25 @@ class AppBase extends Component {
 	}
 
 	renderStatusBar() {
-		const {infoMessage, errorMessage} = this.state;
-		if (!infoMessage && !errorMessage) {
-			return null;
-		}
+		const {infoMessage, errorMessage, loadingVideos} = this.state;
 		return (
 			<div className="statusBar">
-				{infoMessage ? <div className="statusBar__info">{infoMessage}</div> : null}
-				{errorMessage ? <div className="statusBar__error">{errorMessage}</div> : null}
+				<div className="statusBar__message">
+					{errorMessage ? <div className="statusBar__error">{errorMessage}</div> : null}
+					{infoMessage ? (
+						<div className="statusBar__info">{infoMessage}</div>
+					) : !errorMessage ? (
+						<div className="statusBar__placeholder" />
+					) : null}
+				</div>
+				<Button
+					size="small"
+					onClick={this.handleHardRefresh}
+					disabled={loadingVideos}
+					className="statusBar__refresh"
+				>
+					Refresh
+				</Button>
 			</div>
 		);
 	}
@@ -1852,16 +2647,16 @@ class AppBase extends Component {
 							{videoSource ? (
 								<video
 									ref={this.videoRef}
-									key={`${selectedVideo && selectedVideo.id ? selectedVideo.id : 'video'}-${selectedQuality || 'auto'}`}
+									key={`${selectedVideo && selectedVideo.id ? selectedVideo.id : 'video'}-${selectedQuality || 'auto'}-${this.state.playbackToken || '0'}`}
 									className="videoElement"
 									controls
 									autoPlay
 									playsInline
 									preload="auto"
 									crossOrigin="use-credentials"
-								>
-									<source src={videoSource.url} type={videoSource.type || 'application/x-mpegURL'} />
-								</video>
+									src={videoSource.url}
+									data-video-type={videoSource.type || ''}
+								/>
 							) : (
 								<div className="playerPlaceholder">
 									{videoLoading ? (

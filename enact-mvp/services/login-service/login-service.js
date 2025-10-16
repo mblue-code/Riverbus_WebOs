@@ -123,6 +123,7 @@ function respondError(message, errorText, statusCode, extra) {
 
 function performRequest(method, pathName, options) {
 	const opts = options || {};
+	const expectJson = opts.expectJson !== false;
 	logDebug('http_request', {
 		method,
 		path: pathName,
@@ -132,7 +133,7 @@ function performRequest(method, pathName, options) {
 	return new Promise((resolve, reject) => {
 		const data = opts.payload ? JSON.stringify(opts.payload) : null;
 		const headers = {
-			Accept: 'application/json',
+			Accept: opts.accept || 'application/json',
 			'User-Agent': TRUSTED_UA
 		};
 		if (data) {
@@ -159,37 +160,58 @@ function performRequest(method, pathName, options) {
 		};
 
 		const req = https.request(requestOptions, (res) => {
-			let body = '';
-			res.setEncoding('utf8');
+			const bodyChunks = [];
+			if (expectJson) {
+				res.setEncoding('utf8');
+			}
 			res.on('data', (chunk) => {
-				body += chunk;
+				if (expectJson) {
+					bodyChunks.push(chunk);
+				} else if (chunk) {
+					bodyChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+				}
 			});
 			res.on('end', () => {
 				let parsedBody;
-				try {
-					parsedBody = body ? JSON.parse(body) : {};
-				} catch (error) {
-					parsedBody = {message: body};
+				if (expectJson) {
+					const body = bodyChunks.join('');
+					try {
+						parsedBody = body ? JSON.parse(body) : {};
+					} catch (error) {
+						parsedBody = {message: body};
+					}
+				} else {
+					parsedBody = Buffer.concat(bodyChunks);
 				}
-				const responseCookies = res.headers && res.headers['set-cookie'] ? res.headers['set-cookie'] : [];
-				logDebug('http_response', {
-					method,
-					path: pathName,
-					statusCode: res.statusCode,
-					bodyKeys: parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody) ? Object.keys(parsedBody) : null,
-					bodyType: Array.isArray(parsedBody) ? 'array' : typeof parsedBody,
-					cookieCount: responseCookies.length
-				});
+			const responseCookies = res.headers && res.headers['set-cookie'] ? res.headers['set-cookie'] : [];
+			logDebug('http_response', {
+				method,
+				path: pathName,
+				statusCode: res.statusCode,
+				bodyKeys:
+					expectJson && parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)
+						? Object.keys(parsedBody)
+						: null,
+				bodyType: expectJson ? (Array.isArray(parsedBody) ? 'array' : typeof parsedBody) : 'buffer',
+				cookieCount: responseCookies.length
+			});
 				if (res.statusCode >= 400) {
 					let bodyPreview = parsedBody;
-					if (parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)) {
+					if (expectJson) {
+						if (parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)) {
+							bodyPreview = {
+								message: parsedBody.message || null,
+								errors: parsedBody.errors || null,
+								keys: Object.keys(parsedBody)
+							};
+						} else if (typeof parsedBody === 'string') {
+							bodyPreview = parsedBody.slice(0, 500);
+						}
+					} else if (Buffer.isBuffer(parsedBody)) {
 						bodyPreview = {
-							message: parsedBody.message || null,
-							errors: parsedBody.errors || null,
-							keys: Object.keys(parsedBody)
+							length: parsedBody.length,
+							base64Sample: parsedBody.toString('base64', 0, Math.min(parsedBody.length, 24))
 						};
-					} else if (typeof parsedBody === 'string') {
-						bodyPreview = parsedBody.slice(0, 500);
 					}
 					logDebug('http_error_body', {
 						method,
@@ -198,11 +220,11 @@ function performRequest(method, pathName, options) {
 						body: bodyPreview
 					});
 				}
-				resolve({
-					statusCode: res.statusCode,
-					body: parsedBody,
-					cookies: responseCookies
-				});
+			resolve({
+				statusCode: res.statusCode,
+				body: parsedBody,
+				cookies: responseCookies
+			});
 			});
 		});
 
@@ -322,7 +344,7 @@ function extractSourcesFromBody(body) {
 		return sources;
 	}
 
-	const pushSource = (url, quality, type) => {
+	const pushSource = (url, quality, type, extra = null) => {
 		if (!url) {
 			return;
 		}
@@ -339,7 +361,8 @@ function extractSourcesFromBody(body) {
 		sources.push({
 			url,
 			quality: quality || null,
-			type: inferredType
+			type: inferredType,
+			raw: extra
 		});
 	};
 
@@ -352,17 +375,38 @@ function extractSourcesFromBody(body) {
 			const items = cdn.items || cdn.flavors || cdn.streams || [];
 			items.forEach((item) => {
 				if (item && item.url) {
-					pushSource(item.url, item.quality || item.name || cdn.name, item.mimeType || item.type);
+					pushSource(item.url, item.quality || item.name || cdn.name, item.mimeType || item.type, item);
 				}
 				if (item && Array.isArray(item.sources)) {
 					item.sources.forEach((source) => {
 						if (source) {
-							pushSource(source.url, source.quality, source.mimeType || source.type);
+							pushSource(source.url, source.quality, source.mimeType || source.type, source);
 						}
 					});
 				}
+				if (item && Array.isArray(item.downloads)) {
+					item.downloads.forEach((download) => {
+						if (!download || !download.url) {
+							return;
+						}
+						pushSource(
+							download.url,
+							download.quality || download.label || download.name,
+							download.mimeType || download.type,
+							download
+						);
+					});
+				}
+				if (item && Array.isArray(item.files)) {
+					item.files.forEach((file) => {
+						if (!file || !file.url) {
+							return;
+						}
+						pushSource(file.url, file.quality || file.label || file.name, file.mimeType || file.type, file);
+					});
+				}
 				if (item && item.playlist) {
-					pushSource(item.playlist, item.quality || 'playlist', item.mimeType || item.type);
+					pushSource(item.playlist, item.quality || 'playlist', item.mimeType || item.type, item);
 				}
 			});
 		});
@@ -371,13 +415,34 @@ function extractSourcesFromBody(body) {
 	if (Array.isArray(body.items)) {
 		body.items.forEach((item) => {
 			if (item && item.url) {
-				pushSource(item.url, item.quality || item.name, item.mimeType || item.type);
+				pushSource(item.url, item.quality || item.name, item.mimeType || item.type, item);
 			}
 			if (item && Array.isArray(item.sources)) {
 				item.sources.forEach((source) => {
 					if (source) {
-						pushSource(source.url, source.quality, source.mimeType || source.type);
+						pushSource(source.url, source.quality, source.mimeType || source.type, source);
 					}
+				});
+			}
+			if (item && Array.isArray(item.downloads)) {
+				item.downloads.forEach((download) => {
+					if (!download || !download.url) {
+						return;
+					}
+					pushSource(
+						download.url,
+						download.quality || download.label || download.name,
+						download.mimeType || download.type,
+						download
+					);
+				});
+			}
+			if (item && Array.isArray(item.files)) {
+				item.files.forEach((file) => {
+					if (!file || !file.url) {
+						return;
+					}
+					pushSource(file.url, file.quality || file.label || file.name, file.mimeType || file.type, file);
 				});
 			}
 		});
@@ -392,7 +457,12 @@ function extractSourcesFromBody(body) {
 					const variantUrl =
 						variant && variant.url ? (origin ? origin + variant.url : variant.url) : null;
 					if (variantUrl) {
-						pushSource(variantUrl, variant && (variant.label || variant.name), variant && variant.mimeType);
+						pushSource(
+							variantUrl,
+							variant && (variant.label || variant.name),
+							variant && variant.mimeType,
+							variant
+						);
 					}
 				});
 			}
@@ -400,13 +470,34 @@ function extractSourcesFromBody(body) {
 	}
 
 	if (body.url) {
-		pushSource(body.url, body.quality, body.type);
+		pushSource(body.url, body.quality, body.type, body);
 	}
 	if (Array.isArray(body.sources)) {
 		body.sources.forEach((source) => {
 			if (source) {
-				pushSource(source.url, source.quality, source.mimeType || source.type);
+				pushSource(source.url, source.quality, source.mimeType || source.type, source);
 			}
+		});
+	}
+	if (Array.isArray(body.downloads)) {
+		body.downloads.forEach((download) => {
+			if (!download || !download.url) {
+				return;
+			}
+			pushSource(
+				download.url,
+				download.quality || download.label || download.name,
+				download.mimeType || download.type,
+				download
+			);
+		});
+	}
+	if (Array.isArray(body.files)) {
+		body.files.forEach((file) => {
+			if (!file || !file.url) {
+				return;
+			}
+			pushSource(file.url, file.quality || file.label || file.name, file.mimeType || file.type, file);
 		});
 	}
 
@@ -564,8 +655,8 @@ service.register('creatorContent', async (message) => {
 	const hasFetchAfter = Object.prototype.hasOwnProperty.call(payload, 'fetchAfter');
 	const fetchAfterValue = hasFetchAfter ? payload.fetchAfter : undefined;
 	const searchParams = ['id=' + encodeURIComponent(creatorId), 'limit=' + limit];
-	if (!(payload.hasOwnProperty('hasVideo') && payload.hasVideo === false)) {
-		searchParams.push('hasVideo=true');
+	if (payload.hasOwnProperty('hasVideo')) {
+		searchParams.push('hasVideo=' + Boolean(payload.hasVideo));
 	}
 	if (payload.hasOwnProperty('hasAudio')) {
 		searchParams.push('hasAudio=' + Boolean(payload.hasAudio));
@@ -611,7 +702,7 @@ service.register('creatorContent', async (message) => {
 			fetchAfter: fetchAfterValue,
 			search: payload.search,
 			channel: payload.channel,
-			hasVideo: payload.hasOwnProperty('hasVideo') ? payload.hasVideo : true
+			hasVideo: payload.hasOwnProperty('hasVideo') ? payload.hasVideo : undefined
 		});
 		const response = await performRequest('GET', '/api/v3/content/creator?' + query);
 		if (response.cookies && response.cookies.length) {
@@ -770,6 +861,11 @@ service.register('videoDelivery', async (message) => {
 			scenarioAttempted: scenario,
 			scenarioUsed: usedScenario
 		});
+		logDebug('video_delivery_sources', {
+			attachmentId,
+			videoId,
+			sources
+		});
 		respondSuccess(message, {
 			statusCode: deliveryResponse.statusCode,
 			body: {
@@ -780,6 +876,49 @@ service.register('videoDelivery', async (message) => {
 		});
 	} catch (error) {
 		respondError(message, error.message || 'Video delivery failed');
+	}
+});
+
+service.register('watchKey', async (message) => {
+	const payload = message.payload || {};
+	const token = payload && payload.token ? String(payload.token) : '';
+	const cookieHeader = ensureAuth(message, payload);
+	if (!cookieHeader) {
+		return;
+	}
+	if (!token) {
+		respondError(message, 'token is required', 400);
+		return;
+	}
+	try {
+		const query = '/api/video/watchKey?token=' + encodeURIComponent(token);
+		const response = await performRequest('GET', query, {
+			expectJson: false,
+			accept: 'application/octet-stream',
+			headers: {
+				Referer: 'https://www.floatplane.com/',
+				Origin: 'https://www.floatplane.com'
+			}
+		});
+		if (response.statusCode >= 400) {
+			respondError(message, 'Failed to load watch key', response.statusCode);
+			return;
+		}
+		if (response.cookies && response.cookies.length) {
+			applySetCookieCookies(response.cookies);
+		}
+		const buffer = Buffer.isBuffer(response.body) ? response.body : Buffer.from(response.body || '');
+		logDebug('watch_key_result', {
+			tokenPreview: token.slice(0, 12) + '…',
+			byteLength: buffer.length
+		});
+		respondSuccess(message, {
+			statusCode: response.statusCode,
+			key: buffer.toString('base64'),
+			cookieHeader: sessionState ? sessionState.cookieHeader : null
+		});
+	} catch (error) {
+		respondError(message, error.message || 'Failed to load watch key');
 	}
 });
 
