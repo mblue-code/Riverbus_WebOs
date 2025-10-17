@@ -1,7 +1,29 @@
+import 'es6-promise/auto';
+import 'whatwg-fetch';
 import '@enact/moonstone/styles/skin.less';
 import {render} from 'react-dom';
 import App from './App/App';
 import './styles/main.less';
+
+if (typeof Object.assign !== 'function') {
+	Object.assign = function assign(target) {
+		if (target == null) {
+			throw new TypeError('Cannot convert undefined or null to object');
+		}
+		const to = Object(target);
+		for (let index = 1; index < arguments.length; index += 1) {
+			const source = arguments[index];
+			if (source != null) {
+				for (const key in source) {
+					if (Object.prototype.hasOwnProperty.call(source, key)) {
+						to[key] = source[key];
+					}
+				}
+			}
+		}
+		return to;
+	};
+}
 
 if (typeof document !== 'undefined') {
 	const debugNode = document.createElement('div');

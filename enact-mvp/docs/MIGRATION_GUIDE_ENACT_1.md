@@ -20,7 +20,7 @@ This guide provides step-by-step instructions for migrating the Floatplane Enact
 ### 1.1 Create Legacy Branch
 
 ```bash
-cd /Volumes/macminiExtern/webos_app/enact-mvp
+cd path/to/floatplane-enact-mvp
 git checkout -b legacy-webos4-enact1
 ```
 
@@ -112,6 +112,40 @@ module.exports = function configure(config) {
 ```
 
 After adding the config, reinstall (or run `npm dedupe`) to ensure the CLI sees the aliases.
+
+### 1.5 Transpile for Legacy Chromium & Add Polyfills
+
+- In `package.json`, set the Enact build target to older browsers so Babel emits ES5:
+
+```json
+"enact": {
+  "theme": "moonstone",
+  "ri": { "baseSize": 24 },
+  "resolveFallback": {
+    "react": "./node_modules/react",
+    "react-dom": "./node_modules/react-dom"
+  },
+  "target": ["ie11", "chrome41"]
+}
+```
+
+- Install runtime polyfills and import them at the very top of `src/index.js`:
+
+```bash
+npm install es6-promise whatwg-fetch
+```
+
+```javascript
+// src/index.js
+import 'es6-promise/auto';
+import 'whatwg-fetch';
+
+if (typeof Object.assign !== 'function') {
+  // lightweight Object.assign polyfill
+}
+```
+
+These changes ensure the bundle uses only syntax/features supported by the webOS 4 (Chromium 53) engine.
 
 ## Phase 2: React Migration (Hooks → Classes)
 

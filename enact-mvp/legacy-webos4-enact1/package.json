@@ -19,8 +19,10 @@
     "@enact/spotlight": "~1.13.4",
     "hls.js": "^0.12.4",
     "prop-types": "^15.7.2",
+    "es6-promise": "^4.2.8",
     "react": "~15.6.2",
-    "react-dom": "~15.6.2"
+    "react-dom": "~15.6.2",
+    "whatwg-fetch": "^3.6.20"
   },
   "devDependencies": {
     "@enact/cli": "~1.2.1",
@@ -36,6 +38,10 @@
     "ri": {
       "baseSize": 24
     },
+    "target": [
+      "ie11",
+      "chrome41"
+    ],
     "resolveFallback": {
       "react": "./node_modules/react",
       "react-dom": "./node_modules/react-dom"

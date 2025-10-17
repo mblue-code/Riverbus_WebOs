@@ -7,6 +7,7 @@
 - ✅ Reworked `src/App/App.js` and `src/components/LoginForm.js` to drop React 16+ features (fragments, `createRef`, optional chaining) and switch Moonstone control handlers to `onTap`.
 - ✅ Converted class field/arrow property syntax to constructor-bound methods and swapped the unsupported `VirtualGridList` for a `Scroller` + spottable grid that works with Enact 1.x Spotlight.
 - ✅ Added webpack aliases in `enact.config.js` to force React/ReactDOM imports to resolve to the app’s 15.6.2 copies rather than the CLI’s bundled React 16 builds.
+- ✅ Targeted Babel transpilation to legacy Chromium (Chrome 41/IE11) and added Promise/Fetch/Object.assign polyfills so the bundle runs on webOS 4 without syntax/runtime faults.
 
 ## Immediate Next Steps
 - Re-run `npm install` under Node 10 whenever `package.json` changes, then commit the resulting `package-lock.json` to stabilize builds.

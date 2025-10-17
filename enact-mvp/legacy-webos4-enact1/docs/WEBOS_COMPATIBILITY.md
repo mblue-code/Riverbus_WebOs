@@ -68,12 +68,12 @@ According to [LG webOS TV Developer Documentation](https://webostv.developer.lge
 **Device: LG OLED55C8LLA (2018 Model)**
 - Model: OLED55C8LLA (C8 series)
 - webOS Version: 4.0
-- IP: 192.168.1.47
+- IP: 192.168.1.X (example LAN IP)
 - Result: Black screen, application fails to render
 
 **Device: LG TV (2021+ Model)**
 - webOS Version: 6.0 or later
-- IP: 192.168.1.214
+- IP: 192.168.1.Y (example LAN IP)
 - Result: ✅ Application works correctly, encrypted video playback functional
 
 ### Root Cause Analysis

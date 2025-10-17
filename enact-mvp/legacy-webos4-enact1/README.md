@@ -180,7 +180,7 @@ npm run serve
 nvm use 16
 
 # Add device (replace with your TV's IP and passphrase)
-ares-setup-device --add tv1 --info "{'host':'192.168.1.214','port':'9922','username':'prisoner'}"
+ares-setup-device --add tv1 --info "{'host':'192.168.1.X','port':'9922','username':'prisoner'}"
 ```
 
 **Get SSH key from TV:**
@@ -314,8 +314,8 @@ npm run pack && source ~/.nvm/nvm.sh && nvm use 16 && ares-package dist services
 ### Managing Multiple TVs
 
 ```bash
-# Add another TV
-ares-setup-device --add tv2 --info "{'host':'192.168.1.47','port':'9922','username':'prisoner'}"
+# Add another TV (replace with your second TV's IP)
+ares-setup-device --add tv2 --info "{'host':'192.168.1.Y','port':'9922','username':'prisoner'}"
 
 # Get key for second TV
 ares-novacom --device tv2 --getkey
@@ -356,6 +356,7 @@ enact-mvp/
 ├── docs/
 │   ├── WEBOS_COMPATIBILITY.md  # Platform compatibility guide
 │   └── MIGRATION_GUIDE_ENACT_1.md  # Legacy platform migration
+├── resources/                  # App icons (update with assets you have rights to use)
 ├── appinfo.json                # App manifest
 ├── package.json                # Node dependencies
 └── README.md                   # This file
@@ -556,7 +557,7 @@ Located in `services/login-service/services.json`:
 
 - Test thoroughly on multiple TV models
 - Ensure app meets [LG Content Policy](https://webostv.developer.lge.com/distribute/app-review-policy)
-- Create app icons (80x80 and 130x130)
+- Create original app icons (80x80 and 130x130) or confirm you have rights to use existing artwork
 - Prepare screenshots (1920x1080)
 - Write app description and release notes
 

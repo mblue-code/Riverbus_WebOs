@@ -18,7 +18,7 @@ This guide provides step-by-step instructions for migrating the Floatplane Enact
 ### 1.1 Create Legacy Branch
 
 ```bash
-cd /Volumes/macminiExtern/webos_app/enact-mvp
+cd path/to/floatplane-enact-mvp
 git checkout -b legacy-webos4-enact1
 ```
 

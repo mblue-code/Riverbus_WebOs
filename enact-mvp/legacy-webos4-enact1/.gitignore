@@ -1,1 +1,10 @@
+node_modules/
+dist/
+build/
 .package-tmp/
+.deploy/
+*.ipk
+.eslintcache
+*.log
+*.tmp
+.DS_Store
