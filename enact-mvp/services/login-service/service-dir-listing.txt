@@ -1,0 +1,11 @@
+[Info] Set target device : tv2
+total 52
+drwxrwxrwx    2 501      20            4096 Oct 11 22:29 .
+drwxrwxrwx    3 501      20            4096 Oct 11 15:02 ..
+-rw-r--r--    1 501      20             272 Oct 11 22:29 com.community.floatplane.enactmvp.login.json
+-rw-r--r--    1 501      20            5950 Oct 11 22:29 debug.log
+-rw-rw-rw-    1 501      20           13115 Oct 11 22:29 login-service.js
+-rw-r--r--    1 501      20             270 Oct 11 22:29 package.json
+-rw-r--r--    1 501      20             220 Oct 11 22:29 packageinfo.json.bak
+-rw-r--r--    1 501      20             719 Oct 11 22:29 services.json
+-rw-r--r--    1 6025     5000          1046 Oct 11 21:00 session.json

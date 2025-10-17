@@ -1,0 +1,44 @@
+{
+  "name": "floatplane-enact-mvp",
+  "version": "0.1.0-legacy",
+  "private": true,
+  "description": "Enact 1.13-based Floatplane webOS app for 2018 LG webOS 4.0 TVs",
+  "main": "src/index.js",
+  "scripts": {
+    "serve": "enact serve",
+    "pack": "enact pack",
+    "lint": "enact lint",
+    "install-service": "ares-novacom -- install service ./services/login-service"
+  },
+  "dependencies": {
+    "@enact/core": "~1.13.4",
+    "@enact/moonstone": "~1.13.4",
+    "@enact/webos": "~1.13.4",
+    "@enact/ui": "~1.13.4",
+    "@enact/i18n": "~1.13.4",
+    "@enact/spotlight": "~1.13.4",
+    "hls.js": "^0.12.4",
+    "prop-types": "^15.7.2",
+    "react": "~15.6.2",
+    "react-dom": "~15.6.2"
+  },
+  "devDependencies": {
+    "@enact/cli": "~1.2.1",
+    "core-js": "^2.6.12",
+    "eslint": "^4.19.1",
+    "eslint-config-enact": "~1.5.0"
+  },
+  "engines": {
+    "node": ">=8.0.0 <11.0.0"
+  },
+  "enact": {
+    "theme": "moonstone",
+    "ri": {
+      "baseSize": 24
+    },
+    "resolveFallback": {
+      "react": "./node_modules/react",
+      "react-dom": "./node_modules/react-dom"
+    }
+  }
+}

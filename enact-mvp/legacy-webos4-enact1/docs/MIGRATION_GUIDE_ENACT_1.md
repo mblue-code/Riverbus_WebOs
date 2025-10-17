@@ -4,8 +4,6 @@
 
 This guide provides step-by-step instructions for migrating the Floatplane Enact MVP from Enact 4.5.6 (React 18) to Enact 1.13 (React 15) to support older LG webOS 4.0 TVs (2018 models like OLED55C8LLA).
 
-**Current status:** The Enact 1.x work now lives in `legacy-webos4-enact1/`. Track progress and next actions in `docs/LEGACY_WEBOS4_STATUS.md`.
-
 **⚠️ Warning:** This is a major refactoring effort requiring significant code changes. Estimated time: 2-4 weeks full-time development.
 
 ## Prerequisites
@@ -90,28 +88,6 @@ nvm use 10
 # Install dependencies
 npm install
 ```
-
-### 1.4 Force Webpack to Resolve React 15
-
-Enact CLI 1.x ships with React 16 for its internal tooling. Add an `enact.config.js` in the project root to alias `react` and `react-dom` back to the app’s own React 15 copies, preventing the bundle from pulling in the newer runtime:
-
-```javascript
-// enact.config.js
-const path = require('path');
-
-module.exports = function configure(config) {
-  const nodeModules = path.resolve(__dirname, 'node_modules');
-
-  config.resolve = config.resolve || {};
-  config.resolve.alias = config.resolve.alias || {};
-  config.resolve.alias.react = path.join(nodeModules, 'react');
-  config.resolve.alias['react-dom'] = path.join(nodeModules, 'react-dom');
-
-  return config;
-};
-```
-
-After adding the config, reinstall (or run `npm dedupe`) to ensure the CLI sees the aliases.
 
 ## Phase 2: React Migration (Hooks → Classes)
 
@@ -379,10 +355,6 @@ import Button from '@enact/moonstone/Button';
 ```
 
 **Note:** In Enact 1.x, use `onTap` instead of `onClick` for better remote control support.
-
-**Virtual Lists**
-
-- Enact 1.13 does not ship `VirtualGridList`; use `Scroller` + spottable tiles or build on `VirtualList` for custom grids. The legacy fork currently uses a manual `Scroller` grid—validate performance on device.
 
 #### Input
 
