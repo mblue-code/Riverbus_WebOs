@@ -14,11 +14,11 @@ The complete application lives in the `enact-mvp/` directory. See **[enact-mvp/R
 
 ## Features
 
-- Full Floatplane authentication with 2FA support
+- Full Floatplane authentication with 2FA support (2 FA not tested)
 - Creator browsing and video playback (including encrypted HLS streams)
 - Luna Service for server-side API calls (bypasses CORS restrictions)
 - Remote control navigation optimized for TV
-- Video progress tracking and resume playback
+
 
 ## Platform Requirements
 
